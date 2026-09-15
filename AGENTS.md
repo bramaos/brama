@@ -10,6 +10,10 @@ Issues live in GitHub Issues at `bramaos/brama`, managed via the `gh` CLI. See `
 
 Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
+### Commits
+
+Commit messages follow Conventional Commits 1.0.0. The type drives the SemVer bump. See `docs/agents/commits.md`.
+
 ### Changelog
 
 `CHANGELOG.md` follows Keep a Changelog 1.1.0 + SemVer. Every user-facing change gets an `## [Unreleased]` entry in the same commit. See `docs/agents/changelog.md`.
