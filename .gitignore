@@ -1,0 +1,81 @@
+# .gitignore — BramaOS
+#
+# Rules for editing this file:
+#   1. Every entry belongs under one of the commented sections below. If a new
+#      entry fits none of them, add a new section with a one-line rationale.
+#   2. Ignore by pattern, not by instance. Add `*.log`, not `debug-2026-09-15.log`.
+#   3. Never ignore a file to hide a problem. Generated junk in the working dir
+#      means a tool is misconfigured — fix the tool, then ignore its output.
+#   4. Committed-by-design files are listed under "Explicitly tracked" at the
+#      bottom with `!` negations. Do not remove them without a matching change
+#      to docs/product-description.md.
+#   5. Secrets are never committed, never force-added. If a secret lands in a
+#      commit, rotate it — removing it from history is not enough.
+
+# --- Go build output ---------------------------------------------------------
+# Single static binary, built from cmd/brama. Name matches the CLI binary.
+/brama
+/brama.exe
+/dist/
+/build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# --- Go test & tooling artifacts ---------------------------------------------
+*.test
+*.out
+coverage.*
+/vendor/
+go.work
+go.work.sum
+
+# --- Brama runtime state -----------------------------------------------------
+# .brama/ is server-side deployment state (state.json, backups/). It is created
+# on deploy targets, never in this repo — ignored so local end-to-end runs
+# against a loopback target can't leak a host's history into git.
+.brama/
+
+# --- Secrets -----------------------------------------------------------------
+# Brama holds no secret custody: SSH identity lives in ssh-agent / ~/.ssh, and
+# per-environment secrets live in shared/.env on the target. Nothing below
+# should ever exist here; these patterns are a backstop, not a workflow.
+.env
+.env.*
+*.pem
+*.key
+id_rsa
+id_ed25519
+*_rsa
+*_ed25519
+!*.pub
+
+# --- Local scratch & fixtures ------------------------------------------------
+# .scratch/ is agent working space (see docs/agents/). tmp/ is ad-hoc.
+.scratch/
+tmp/
+*.local
+*.local.*
+
+# --- Learning workspace ------------------------------------------------------
+# learn/ is a personal Go teaching workspace (lessons, references, progress).
+# It is about the author, not the product, and carries no build or runtime role.
+learn/
+
+# --- Editors & IDEs ----------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS noise ----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Explicitly tracked ------------------------------------------------------
+# brama.yaml is project config and is committed by design — it declares intent
+# (branches, targets, policies), it does not carry credentials.
+!brama.yaml
