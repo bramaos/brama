@@ -11,6 +11,6 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
-- Nothing yet. v0.1 is not implemented.
+- Add `brama version`, which prints the version the binary was built from.
 
 [unreleased]: https://github.com/bramaos/brama/commits/main
