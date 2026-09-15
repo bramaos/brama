@@ -8,8 +8,15 @@ and raw production data never leaves the production server.
 ### Environments
 
 **Environment**:
-A named target Brama can act on — `production`, `staging`, `local`. Bound to exactly one Server.
+A named target Brama can act on — `production`, `staging`, `local`. Reached through exactly one
+Executor.
 _Avoid_: instance, stage, tier, site
+
+**Reach**:
+How Brama gets to an Environment — directly, on the machine it is running on, or across SSH to a
+Server. Derived from whether the Environment names a Server, never declared on its own: anything
+that can edit `brama.yaml` must not be able to change what an Environment is.
+_Avoid_: class, type, locality, tier
 
 **Server**:
 A registered SSH host that hosts one or more Environments.
@@ -121,5 +128,18 @@ Moving a validated Environment state forward, staging to production.
 _Avoid_: ship, release (as a verb), push
 
 **Executor**:
-The transport that carries an operation to a Server.
+The transport that carries an operation to an Environment — over SSH to a Server, or directly
+when the Environment is `local`.
 _Avoid_: runner, transport, connection
+
+### Output
+
+**Result**:
+What an operation returns when it finishes — the facts about what happened, carrying no
+formatting. `PullResult`, `DoctorResult`.
+_Avoid_: response, report, output, summary
+
+**Renderer**:
+The component that turns a Result into output for one audience: a person, or the documented
+JSON contract. The only part of Brama that knows a terminal exists.
+_Avoid_: formatter, printer, view, presenter, UI

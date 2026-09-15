@@ -302,6 +302,7 @@ Policy is a third thing, and it lives only on the Server. It is not Desired stat
 cmd/brama
 cmd/brama-shim
 internal/
+  cli/               # cobra commands, wrapped by fang
   config/
   core/
     pull/
@@ -319,11 +320,38 @@ internal/
   adapter/
     wordpress/
     laravel/
+  refusal/           # the declined-operation outcome
+  renderer/
+    human/           # lip gloss, huh
+    json/            # the §10 contract
+  scaffold/          # writes the starting brama.yaml
   policy/            # v0.2
 docs/
 examples/
 tests/
 ```
+
+### The rendering rule
+
+The core never formats. Every operation returns a Result value — `PullResult`, `DoctorResult` —
+and a Renderer turns it into either human output or the §10 JSON contract. Two consequences,
+both load-bearing:
+
+**`--json` cannot be forgotten.** A command that returns a Result gets machine output for free,
+because it never had the option of printing prose instead.
+
+**The Shim stays small.** `cmd/brama-shim` is uploaded over SSH and version-checked on every
+operation, so it must not carry a terminal UI it can never use. Because the core formats nothing,
+the Shim links `core/`, `schema/` and `executor/` without pulling in Cobra, Fang, Huh or Lip Gloss.
+
+The rule that enforces both:
+
+> Nothing under `core/`, `schema/`, `config/` or `executor/` may import `renderer/`, `cli/`, or any
+> Charm package.
+
+Deployment packages (`core/deploy/`, `core/backup/`) are deliberately absent rather than empty.
+An empty package is not a seam — the seams are the `Executor` interface and the Result pattern,
+which already exist. See `docs/adr/0004-ship-the-data-half-first.md`.
 
 ### Config sketch
 
