@@ -1,19 +1,16 @@
 package main
 
 import (
-	"fmt"
 	"os"
+
+	"github.com/bramaos/brama/internal/cli"
 )
 
 // version is overwritten at build time via -ldflags. See the toolchain reference.
 var version = "dev"
 
+// main does nothing but choose the exit code, so that every command can return an
+// error normally and let its deferred cleanup run.
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println("brama", version)
-		return
-	}
-
-	fmt.Fprintln(os.Stderr, "usage: brama <command>")
-	os.Exit(2)
+	os.Exit(cli.Main(version))
 }
