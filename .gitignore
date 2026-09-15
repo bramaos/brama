@@ -16,6 +16,7 @@
 # Single static binary, built from cmd/brama. Name matches the CLI binary.
 /brama
 /brama.exe
+/bin/
 /dist/
 /build/
 *.exe
