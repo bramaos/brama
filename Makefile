@@ -7,9 +7,19 @@ GO ?= go
 BIN := bin/brama
 PKG := ./...
 
+# The shim is cross-built and embedded into brama, which is why `binary` depends on
+# it. A plain `go build` still works without these: internal/shim/bin ships a
+# placeholder so a checkout compiles, and a brama built that way says so when asked
+# to install one.
+SHIM_DIR := internal/shim/bin
+SHIM_PLATFORMS := linux/amd64 linux/arm64
+
 # Stamped into main.version at link time. Falls back to "dev" outside a git tree.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
+# The shim carries the same version as the brama that embeds it: brama compares what
+# it shipped against what answers on the server, so the two come from one build.
+SHIM_LDFLAGS := -s -w -X main.version=$(VERSION)
 
 .DEFAULT_GOAL := check
 
@@ -22,9 +32,20 @@ check: fmt-check tidy-check vet build test
 build:
 	$(GO) build $(PKG)
 
-## binary: build the brama binary into bin/
+## shim: cross-build the shim binaries brama embeds
+.PHONY: shim
+shim:
+	@for platform in $(SHIM_PLATFORMS); do \
+		os=$${platform%%/*}; arch=$${platform#*/}; \
+		echo "  $(SHIM_DIR)/shim-$$os-$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch $(GO) build -trimpath \
+			-ldflags "$(SHIM_LDFLAGS)" \
+			-o $(SHIM_DIR)/shim-$$os-$$arch ./cmd/brama-shim || exit 1; \
+	done
+
+## binary: build the brama binary into bin/, shims embedded
 .PHONY: binary
-binary:
+binary: shim
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/brama
 
 ## test: run the test suite with the race detector
@@ -62,6 +83,7 @@ tidy-check:
 .PHONY: clean
 clean:
 	rm -rf bin/
+	rm -f $(SHIM_DIR)/shim-*
 
 ## help: list available targets
 .PHONY: help

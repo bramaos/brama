@@ -24,6 +24,12 @@
 *.so
 *.dylib
 
+# --- Embedded shim builds ----------------------------------------------------
+# Cross-built by `make shim` into the directory brama embeds. Build output, not
+# source: the checkout keeps only internal/shim/bin/PLACEHOLDER, which is what
+# lets `go build ./...` work without them.
+internal/shim/bin/shim-*
+
 # --- Go test & tooling artifacts ---------------------------------------------
 *.test
 *.out

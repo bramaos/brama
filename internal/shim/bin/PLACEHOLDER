@@ -1,0 +1,13 @@
+This directory holds the cross-built Shim binaries that `brama` embeds.
+
+It is empty in a checkout on purpose, and this file is here so that the embed
+directive has a directory to read — `go build ./...` and `go test ./...` then work
+for a contributor who never touches SSH.
+
+`make binary` fills it in:
+
+    shim-linux-amd64
+    shim-linux-arm64
+
+Those builds are gitignored. A brama built without them still compiles; it fails
+when asked to install a Shim, saying so and naming the fix.
