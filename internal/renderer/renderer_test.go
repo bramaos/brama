@@ -226,3 +226,54 @@ func TestHumanRefusalStatesTheFix(t *testing.T) {
 		t.Errorf("refusal wrote to stdout, want stderr only: %q", out.String())
 	}
 }
+
+// An empty value does not always mean "brama could not work this out". A server's
+// user is empty when nobody set one, which means OpenSSH decides — a deliberate
+// state, not a gap. The Result knows the difference; the renderer cannot guess it.
+func TestHumanRendersADeliberateAbsenceInItsOwnWords(t *testing.T) {
+	var out, errOut bytes.Buffer
+	r := &fakeResult{
+		status: renderer.StatusSuccess,
+		fields: renderer.Fields{}.
+			AddOptional("user", "User", "", "from ~/.ssh/config").
+			Add("local_url", "Local URL", ""),
+	}
+
+	if err := renderer.NewHuman(&out, &errOut).Result(r); err != nil {
+		t.Fatal(err)
+	}
+
+	body := out.String()
+	if !strings.Contains(body, "from ~/.ssh/config") {
+		t.Errorf("output does not say what the absence means:\n%s", body)
+	}
+	// The field with no stated meaning keeps the default.
+	if !strings.Contains(body, "not determined") {
+		t.Errorf("an ordinary empty value lost its wording:\n%s", body)
+	}
+}
+
+// The wording is for a person. The contract still says null, because "there is no
+// answer" is the fact — not the sentence brama uses to explain it.
+func TestJSONIgnoresTheAbsenceWording(t *testing.T) {
+	var out bytes.Buffer
+	r := &fakeResult{
+		status: renderer.StatusSuccess,
+		fields: renderer.Fields{}.AddOptional("user", "User", "", "from ~/.ssh/config"),
+	}
+
+	if err := renderer.NewJSON(&out).Result(r); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "ssh/config") {
+		t.Errorf("human prose leaked into the contract:\n%s", out.String())
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := got["user"]; !ok || value != nil {
+		t.Errorf("user = %v, want null", value)
+	}
+}

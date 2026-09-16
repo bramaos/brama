@@ -83,7 +83,7 @@ func (r *ServerAddResult) Fields() []renderer.Field {
 	return renderer.Fields{}.
 		Add("server", "Server", r.Name).
 		Add("host", "Host", r.Host).
-		Add("user", "User", r.User).
+		AddOptional("user", "User", r.User, "from ~/.ssh/config").
 		Add("platform", "Platform", r.Platform).
 		Add("shim_version", "Shim version", r.Shim.Version).
 		Add("shim_uploaded", "Shim uploaded", r.Shim.Uploaded)
