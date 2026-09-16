@@ -18,7 +18,7 @@ See `docs/agents/changelog.md` for how entries are written.
 - Add the shim, installed at `~/.brama/shim` on a server. Builds for `linux/amd64`
   and `linux/arm64` are embedded in `brama` and streamed down the connection already
   open, so nothing is fetched over the server's own network. This build answers
-  `--version`. (#2)
+  `--version`. (#2, #3)
 - Add `brama version`, which prints the version the binary was built from.
 - Add `brama init`, which detects the adapter and writes a starting `brama.yaml`. It
   writes no credentials and no classification — `brama anonymize init` owns the
