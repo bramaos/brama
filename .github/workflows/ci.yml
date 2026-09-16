@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   check:
-    name: build, vet, test
+    name: build, vet, test, cross-build the shim
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -44,5 +44,19 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # `go build ./...` compiles cmd/brama-shim for this runner and nothing else, so
+      # a change that breaks the linux/arm64 cross-build ships silently and fails on
+      # the first arm64 server that registers. Both architectures are built here, and
+      # the tests below then run against the real binaries rather than skipping.
+      - name: make shim
+        run: make shim
+
       - name: go test
         run: go test -race ./...
+
+      # The tests above read the embedded builds; this proves the last step of
+      # distribution, that a brama carrying them still links and runs.
+      - name: make binary
+        run: |
+          make binary
+          ./bin/brama version
