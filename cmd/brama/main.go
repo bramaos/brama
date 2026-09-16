@@ -1,3 +1,5 @@
+// Command brama moves data downward — production to staging to local — anonymizing
+// it on the server before it is transferred.
 package main
 
 import (
