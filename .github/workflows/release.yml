@@ -1,0 +1,92 @@
+name: release
+
+# Tagging is what publishes. Nothing here runs on a branch, and nothing here is the
+# step where a human clicks something: a tag that reaches main's history produces a
+# release, or produces a red run and no release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # A tag points at a commit, and a commit can be tagged long after CI last looked at
+  # it. This runs the same gate `make check` runs before anything is built for
+  # publication, so a release cannot be cut from a tree that does not pass.
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-tags: true
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: make check
+
+  goreleaser:
+    name: goreleaser
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Creates the release and uploads the archives to it.
+      contents: write
+      # Signs the provenance attestation with a short-lived workload identity, so
+      # there is no key to store or rotate.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # goreleaser reads the tag and the history behind it. A shallow clone makes
+          # it refuse to run rather than guess.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # .goreleaser.yaml generates an SBOM per archive; syft is what generates it.
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+
+      # The release body comes out of CHANGELOG.md, which is the record this project
+      # keeps by hand. A tag with no section in it fails here, before anything is
+      # published, rather than producing a release with empty notes.
+      - name: release notes
+        run: make release-notes TAG="${GITHUB_REF_NAME}" >/tmp/release-notes.md
+
+      # Reads the pin out of the Makefile, so `make release-snapshot` on a laptop and
+      # the release published from a tag come off the same goreleaser.
+      - id: pin
+        run: echo "goreleaser=$(make print-GORELEASER_VERSION)" >>"$GITHUB_OUTPUT"
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: ${{ steps.pin.outputs.goreleaser }}
+          args: release --clean --release-notes=/tmp/release-notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Records, in a form anyone can check, which workflow built these files from
+      # which commit. `gh attestation verify brama_0.1.0_linux_amd64.tar.gz --repo
+      # bramaos/brama` answers it without trusting the release page.
+      #
+      # This matters more for brama than for most tools: a brama binary carries the
+      # shim binaries it will install on someone's server, so whoever downloads it is
+      # also downloading what will run there.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/checksums.txt

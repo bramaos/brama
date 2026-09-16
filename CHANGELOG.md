@@ -11,6 +11,10 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Publish `brama` for `linux` and `darwin`, on `amd64` and `arm64`, as an archive per
+  release. Each release carries a checksum file, an SBOM per archive, and a build
+  provenance attestation, so a download can be traced to the commit and the workflow
+  that produced it: `gh attestation verify <file> --repo bramaos/brama`.
 - Upgrade the shim on a server to the version of `brama` reaching it, as a step of
   its own before anything else runs, never partway through. (#4)
 - Name both versions when the shim moves — `shim upgraded 0.1.0 → 0.1.1` — so the

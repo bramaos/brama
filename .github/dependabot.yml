@@ -1,0 +1,49 @@
+# Actions in this repository are pinned to a commit SHA rather than a tag, because a
+# tag can be moved to point at different code. A SHA that nobody updates is a pin to
+# a version that stops getting fixes, so the pinning only works with something that
+# bumps it — that is what this file is for. Dependabot rewrites both the SHA and the
+# `# vX.Y.Z` comment beside it.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # One pull request per action, so a bump that breaks CI is obvious from which
+    # pull request went red.
+    open-pull-requests-limit: 5
+    commit-message:
+      # Conventional Commits, per docs/agents/commits.md. `ci` because these are
+      # workflow files and a bump here changes nothing a user of brama can see.
+      prefix: ci
+    labels:
+      - dependencies
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      # `build` for direct dependencies, matching a change to go.mod being a change
+      # to how brama is built. A security bump gets rewritten to `fix(deps)` by hand
+      # when it closes an advisory — see the golang.org/x/text entry in CHANGELOG.md.
+      prefix: build
+      prefix-development: chore
+    labels:
+      - dependencies
+    groups:
+      # charm.land/* and its transitive colour libraries move together. Separate pull
+      # requests for each would be a week of noise for one upgrade.
+      charm:
+        patterns:
+          - 'charm.land/*'
+          - 'github.com/charmbracelet/*'
+          - 'github.com/lucasb-eyer/*'
+          - 'github.com/muesli/*'
+      golang-x:
+        patterns:
+          - 'golang.org/x/*'

@@ -4,67 +4,98 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a run be repeated from the Actions tab without an empty commit — useful
+  # when a job failed on something outside the tree.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to the same branch cancels the older run.
+# A newer push to the same branch cancels the older run, on pull requests only.
+# Runs on main are not cancelled: main's history is what a release is cut from, so
+# every commit on it gets a verdict of its own rather than being superseded by the
+# next push.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Defined in its own reusable workflow so the version pin and the runner matrix
-  # live in one place.
+  # live in one place. Called by path rather than by `bramaos/brama/...@main`: a
+  # local reference runs the copy in the commit under test, so a pull request that
+  # changes how brama lints is linted the new way before it merges, not after.
   lint:
-    uses: bramaos/brama/.github/workflows/lint.yml@main
+    uses: ./.github/workflows/lint.yml
 
   # Separate from the linters: this reports on the outside world rather than on the
-  # commit, so it can go red without the tree having changed.
+  # commit, so it can go red without the tree having changed. security.yml runs it
+  # again on a schedule, for the commits nobody pushed to.
   govulncheck:
     name: govulncheck
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
-        # Pinned to match the Makefile. The vulnerability database is fetched live
-        # either way, so this pins the scanner, not what it knows about.
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      # The version is pinned in the Makefile, which is the only place it appears.
+      # The vulnerability database is fetched live either way, so the pin covers the
+      # scanner, not what it knows about.
+      - run: make vuln
 
   check:
-    name: build, vet, test, cross-build the shim
-    runs-on: ubuntu-latest
+    name: check (${{ matrix.os }})
+    strategy:
+      # One runner failing should not hide the verdict on the other: a darwin-only
+      # path bug and a linux-only path bug look identical until both have reported.
+      fail-fast: false
+      matrix:
+        # brama runs on the machine an operator sits at, and touches paths, file
+        # modes and SSH from there. Linux alone would leave darwin's differences to
+        # be found by whoever is holding the laptop.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # `make binary` stamps main.version from `git describe --tags`. A clone
+          # without tags describes every commit as a bare hash, so the `brama
+          # version` asserted at the end of this job would not be a version.
+          fetch-tags: true
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Single source of truth for the Go version: go.mod.
           go-version-file: go.mod
           cache: true
 
+      # Each check is its own step, in the order `make check` runs them, so a red
+      # run names what broke in the job list. The recipes themselves live in the
+      # Makefile: CI runs the same commands a developer does, rather than a second
+      # copy of them that can drift.
+      #
+      # gofmt rather than trusting golangci-lint's formatters: .golangci.yml sets
+      # `run: tests: false`, so the linter never sees a _test.go file, and the test
+      # files are most of the tree.
       - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::These files are not gofmt'd. Run 'make fmt'."
-            echo "$unformatted"
-            exit 1
-          fi
+        run: make fmt-check
 
       - name: go mod tidy
-        run: go mod tidy -diff
+        run: make tidy-check
 
       - name: go vet
-        run: go vet ./...
+        run: make vet
 
       - name: go build
-        run: go build ./...
+        run: make build
 
       # `go build ./...` compiles cmd/brama-shim for this runner and nothing else, so
       # a change that breaks the linux/arm64 cross-build ships silently and fails on
@@ -74,7 +105,7 @@ jobs:
         run: make shim
 
       - name: go test
-        run: go test -race ./...
+        run: make cover
 
       # The tests above read the embedded builds; this proves the last step of
       # distribution, that a brama carrying them still links and runs.
@@ -82,3 +113,26 @@ jobs:
         run: |
           make binary
           ./bin/brama version
+
+      # Put the total on the run's summary page, so the number is visible without
+      # downloading anything. `if: always()` because a failed test still produced a
+      # partial profile, and that is the profile worth looking at.
+      - name: coverage summary
+        if: always()
+        run: |
+          [ -f coverage.out ] || exit 0
+          {
+            echo "### Coverage — ${{ matrix.os }}"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | tail -1
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.out
+          if-no-files-found: ignore
+          retention-days: 14

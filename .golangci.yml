@@ -36,6 +36,15 @@ linters:
       # would delete the point of the sentence.
       ignore-rules:
         - enviroments
+    wrapcheck:
+      # wrapcheck exists so an error from someone else's package arrives in brama's
+      # words rather than theirs. brama's own packages already speak in brama's
+      # words: `shim.Ensure` returns "installing the shim on web-1: ...", and the
+      # caller that has more to say wraps it again. Treating every internal package
+      # boundary as foreign would turn a real check into a ritual, and the ritual
+      # would double-wrap the messages it touched.
+      ignore-package-globs:
+        - github.com/bramaos/brama/internal/*
   exclusions:
     generated: lax
     presets:
