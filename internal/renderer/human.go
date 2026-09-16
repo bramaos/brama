@@ -44,7 +44,7 @@ func (h *Human) Result(r Result) error {
 	lipgloss.Fprintln(h.Out)
 	for _, f := range fields {
 		label := labelStyle.Render(pad(f.Label, width))
-		lipgloss.Fprintf(h.Out, "  %s  %s\n", label, humanValue(f.Value))
+		lipgloss.Fprintf(h.Out, "  %s  %s\n", label, humanValue(f))
 	}
 
 	if noted, ok := r.(Noted); ok {
@@ -80,8 +80,8 @@ func (h *Human) Error(_ string, err error) error {
 // humanValue renders a field value for a person. A list is joined rather than shown
 // in Go's bracket syntax, and an empty one says "none" — the machine contract keeps
 // the empty array, because the absence of unresolved keys is itself a fact.
-func humanValue(v any) string {
-	switch value := v.(type) {
+func humanValue(f Field) string {
+	switch value := f.Value.(type) {
 	case []string:
 		if len(value) == 0 {
 			return "none"
@@ -89,11 +89,14 @@ func humanValue(v any) string {
 		return strings.Join(value, ", ")
 	case string:
 		if value == "" {
+			if f.Absent != "" {
+				return f.Absent
+			}
 			return "not determined"
 		}
 		return value
 	default:
-		return fmt.Sprintf("%v", v)
+		return fmt.Sprintf("%v", f.Value)
 	}
 }
 

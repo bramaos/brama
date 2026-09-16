@@ -54,6 +54,14 @@ type Field struct {
 	Label string
 	// Value is the fact itself.
 	Value any
+	// Absent is what a person is told when Value is empty, for the fields where
+	// empty is a deliberate state rather than a gap — a server with no user means
+	// OpenSSH decides, which is not the same as a path brama could not find. The
+	// Result knows which it is; the renderer cannot guess.
+	//
+	// It is a rendering hint, not contract data: the JSON renderer never reads it,
+	// and an empty Value is still null there.
+	Absent string
 }
 
 // Renderer writes a Result, or a Refusal, for one audience.
@@ -73,4 +81,10 @@ type Fields []Field
 
 func (f Fields) Add(key, label string, value any) Fields {
 	return append(f, Field{Key: key, Label: label, Value: value})
+}
+
+// AddOptional adds a field whose empty value means something specific, and says what
+// a person should be told when it is.
+func (f Fields) AddOptional(key, label string, value any, absent string) Fields {
+	return append(f, Field{Key: key, Label: label, Value: value, Absent: absent})
 }

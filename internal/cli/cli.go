@@ -90,7 +90,7 @@ func Main(version string) int {
 		env.Renderer = renderer.NewHuman(env.Out, env.Err)
 	}
 
-	root.AddCommand(newInitCmd(env), newVersionCmd(env, version))
+	root.AddCommand(newInitCmd(env), newServerCmd(env, version), newVersionCmd(env, version))
 
 	err := fang.Execute(
 		context.Background(),

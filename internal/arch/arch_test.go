@@ -27,6 +27,8 @@ func TestCoreDoesNotImportARenderer(t *testing.T) {
 		"internal/adapter/wordpress",
 		"internal/scaffold",
 		"internal/refusal",
+		"internal/shim",
+		"internal/ssh",
 	}
 
 	forbidden := []string{
