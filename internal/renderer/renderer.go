@@ -79,6 +79,7 @@ type Renderer interface {
 // Fields is a small helper for building a Result's fields.
 type Fields []Field
 
+// Add appends a field whose empty value carries no special meaning.
 func (f Fields) Add(key, label string, value any) Fields {
 	return append(f, Field{Key: key, Label: label, Value: value})
 }

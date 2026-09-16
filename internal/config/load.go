@@ -14,6 +14,11 @@ import (
 // Filename is the name brama looks for, at or above the working directory.
 const Filename = "brama.yaml"
 
+// FileMode is what brama.yaml is written with. 0644, not 0600: it is desired state
+// committed to git (ADR-0005) and holds no secrets, so it stays readable by anything
+// that can read the checkout.
+const FileMode = 0o644
+
 // ErrNotFound reports that no brama.yaml exists at or above the starting directory.
 var ErrNotFound = errors.New("no " + Filename + " found")
 
@@ -24,7 +29,7 @@ var ErrNotFound = errors.New("no " + Filename + " found")
 func Find(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolving %s: %w", startDir, err)
 	}
 	for {
 		candidate := filepath.Join(dir, Filename)
@@ -49,7 +54,7 @@ func Load(startDir string) (*Config, string, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, path, err
+		return nil, path, fmt.Errorf("reading %s: %w", path, err)
 	}
 	cfg, err := Parse(data)
 	if err != nil {

@@ -30,7 +30,11 @@ type session interface {
 type dialer func(ctx context.Context, t ssh.Target) (session, error)
 
 func dialSSH(ctx context.Context, t ssh.Target) (session, error) {
-	return ssh.Open(ctx, t)
+	s, err := ssh.Open(ctx, t)
+	if err != nil {
+		return nil, fmt.Errorf("opening an ssh session: %w", err)
+	}
+	return s, nil
 }
 
 // installer is everything the command needs to reach a Server and put a Shim on it.
@@ -158,10 +162,10 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 			"it — but sends nothing and writes nothing.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
 			if err != nil {
-				return err
+				return fmt.Errorf("finding the working directory: %w", err)
 			}
 			srv := config.Server{Host: host, User: user}
 			return runServerAdd(env, dir, args[0], srv, sshInstaller(version), dryRun)
@@ -195,12 +199,12 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 		return fmt.Errorf("no %s in this project — run: brama init", config.Filename)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("looking for %s: %w", config.Filename, err)
 	}
 
 	body, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading %s: %w", path, err)
 	}
 	if _, err := config.Parse(body); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
@@ -215,7 +219,7 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 		return fmt.Errorf("server %q is already registered — edit %s to change it", name, config.Filename)
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("adding server %q to %s: %w", name, config.Filename, err)
 	}
 
 	if !inst.embedded() {
@@ -230,7 +234,7 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 
 	remote, err := inst.dial(ctx, ssh.Target{Host: srv.Host, User: srv.User})
 	if err != nil {
-		return err
+		return fmt.Errorf("reaching %s: %w", srv.Host, err)
 	}
 	defer func() { _ = remote.Close() }()
 
@@ -245,7 +249,7 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 	// docs/product-description.md, "The Shim".
 	step, err := inst.shimStep(ctx, remote, dryRun)
 	if err != nil {
-		return err
+		return fmt.Errorf("installing the shim on %s: %w", name, err)
 	}
 
 	if !dryRun {
@@ -254,7 +258,7 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 		}
 	}
 
-	return env.Renderer.Result(&ServerAddResult{
+	if err := env.Renderer.Result(&ServerAddResult{
 		Name:     name,
 		Host:     srv.Host,
 		User:     srv.User,

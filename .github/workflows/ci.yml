@@ -14,6 +14,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Defined in its own reusable workflow so the version pin and the runner matrix
+  # live in one place.
+  lint:
+    uses: bramaos/brama/.github/workflows/lint.yml@main
+
+  # Separate from the linters: this reports on the outside world rather than on the
+  # commit, so it can go red without the tree having changed.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+        # Pinned to match the Makefile. The vulnerability database is fetched live
+        # either way, so this pins the scanner, not what it knows about.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
   check:
     name: build, vet, test, cross-build the shim
     runs-on: ubuntu-latest

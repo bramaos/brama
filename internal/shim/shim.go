@@ -42,6 +42,14 @@ func (p Platform) String() string { return p.OS + "/" + p.Arch }
 // filename is the embedded name for a Platform's build.
 func (p Platform) filename() string { return "bin/shim-" + p.OS + "-" + p.Arch }
 
+// The Go architecture names in the build matrix. Named because they appear both here
+// and as the targets of the uname translation below, and the two must not drift.
+const (
+	archAMD64 = "amd64"
+	archARM64 = "arm64"
+	arch386   = "386"
+)
+
 // SupportedPlatforms is the matrix brama builds for.
 //
 // Linux only, and both architectures: arm64 is ordinary now at Hetzner, Graviton and
@@ -49,8 +57,8 @@ func (p Platform) filename() string { return "bin/shim-" + p.OS + "-" + p.Arch }
 // Mac serving production is rare enough not to be worth the weight in every binary.
 func SupportedPlatforms() []Platform {
 	return []Platform{
-		{OS: "linux", Arch: "amd64"},
-		{OS: "linux", Arch: "arm64"},
+		{OS: "linux", Arch: archAMD64},
+		{OS: "linux", Arch: archARM64},
 	}
 }
 
@@ -95,13 +103,13 @@ func Binary(p Platform) ([]byte, error) {
 // name still resolves, and one that does not is reported as unsupported by name,
 // which is more useful than "unrecognised".
 var unameArch = map[string]string{
-	"x86_64":  "amd64",
-	"amd64":   "amd64",
-	"aarch64": "arm64",
-	"arm64":   "arm64",
-	"i686":    "386",
-	"i386":    "386",
-	"x86":     "386",
+	"x86_64":  archAMD64,
+	"amd64":   archAMD64,
+	"aarch64": archARM64,
+	"arm64":   archARM64,
+	"i686":    arch386,
+	"i386":    arch386,
+	"x86":     arch386,
 }
 
 // ParsePlatform reads the output of `uname -sm`.

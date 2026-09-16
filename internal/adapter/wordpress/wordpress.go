@@ -19,6 +19,7 @@ import (
 // Detector recognises WordPress, in both the vanilla and Bedrock arrangements.
 type Detector struct{}
 
+// Name is the value `--adapter` takes and what brama.yaml records under app.adapter.
 func (Detector) Name() string { return "wordpress" }
 
 // Detect reports a WordPress project under root.

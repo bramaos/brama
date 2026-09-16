@@ -91,8 +91,16 @@ func (s *Session) Close() error {
 	args := append(s.baseArgs(), "-O", "exit", s.host)
 	// The master exits with the socket either way; a failure here means it was
 	// already gone, which is the state Close is trying to reach.
+	//
+	// Deliberately context-free: Close runs on the way out of a cancelled operation,
+	// and a CommandContext carrying that cancelled context would decline to run at
+	// all — leaving the authenticated socket open, which is what Close is for.
+	//nolint:noctx // see above: teardown must outlive the context it is tearing down.
 	_ = exec.Command("ssh", args...).Run()
-	return os.RemoveAll(s.dir)
+	if err := os.RemoveAll(s.dir); err != nil {
+		return fmt.Errorf("removing the control directory: %w", err)
+	}
+	return nil
 }
 
 // Run executes a command on the Server and returns its standard output.

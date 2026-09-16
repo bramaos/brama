@@ -95,10 +95,10 @@ func newInitCmd(env *console) *cobra.Command {
 			"will refuse.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(*cobra.Command, []string) error {
 			root, err := os.Getwd()
 			if err != nil {
-				return err
+				return fmt.Errorf("finding the working directory: %w", err)
 			}
 			return runInit(env, root, adapterName, dryRun)
 		},
@@ -129,7 +129,7 @@ func runInit(env *console, root, adapterName string, dryRun bool) error {
 
 	body := scaffold.Skeleton(result)
 	if !dryRun {
-		if err := os.WriteFile(target, body, 0o644); err != nil {
+		if err := os.WriteFile(target, body, config.FileMode); err != nil {
 			return fmt.Errorf("writing %s: %w", config.Filename, err)
 		}
 	}
@@ -144,10 +144,12 @@ func runInit(env *console, root, adapterName string, dryRun bool) error {
 		unresolved: result.Unresolved,
 	}
 	if err := env.Renderer.Result(out); err != nil {
-		return err
+		return fmt.Errorf("rendering the init result: %w", err)
 	}
 	if dryRun {
-		env.writeSkeletonPreview(body)
+		if err := env.writeSkeletonPreview(body); err != nil {
+			return err
+		}
 	}
 
 	// The skeleton is written either way, so there is something to edit — but the
@@ -161,7 +163,11 @@ func runInit(env *console, root, adapterName string, dryRun bool) error {
 
 func detect(root, adapterName string) (adapter.Detection, error) {
 	if adapterName != "" {
-		return adapter.DetectAs(root, adapterName, detectors())
+		detection, err := adapter.DetectAs(root, adapterName, detectors())
+		if err != nil {
+			return adapter.Detection{}, fmt.Errorf("using the %s adapter: %w", adapterName, err)
+		}
+		return detection, nil
 	}
 
 	result, err := adapter.Detect(root, detectors())
@@ -170,5 +176,8 @@ func detect(root, adapterName string) (adapter.Detection, error) {
 			"no adapter recognised this project — rerun with --adapter (%s) if you know what it is",
 			join(adapter.Names(detectors())))
 	}
-	return result, err
+	if err != nil {
+		return adapter.Detection{}, fmt.Errorf("detecting the adapter: %w", err)
+	}
+	return result, nil
 }

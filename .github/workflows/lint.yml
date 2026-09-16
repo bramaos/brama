@@ -1,0 +1,56 @@
+name: lint
+
+# A reusable workflow rather than a triggered one: the lint step is defined once,
+# with one version pin, and ci.yml calls it. Callers supply nothing in the normal
+# case — the defaults below are brama's.
+on:
+  workflow_call:
+    inputs:
+      golangci_path:
+        type: string
+        required: false
+        default: .golangci.yml
+        description: Path to the golangci-lint config.
+      golangci_version:
+        type: string
+        required: false
+        # Pinned, not floating: golangci-lint adds linters and tightens existing ones
+        # between minors, so `latest` goes red on a commit that changed nothing. Bump
+        # this and GOLANGCI_VERSION in the Makefile together.
+        default: v2.13.2
+        description: Version of golangci-lint to run.
+      timeout:
+        type: string
+        required: false
+        default: 10m
+        description: Timeout passed to golangci-lint.
+      os:
+        type: string
+        required: false
+        # Single runner by default: brama has no build tags and no GOOS-specific
+        # files, so a wider matrix would lint identical code more than once.
+        default: '["ubuntu-latest"]'
+        description: JSON array of runners to lint on.
+
+permissions:
+  contents: read
+
+jobs:
+  golangci-lint:
+    strategy:
+      matrix:
+        os: ${{ fromJSON(inputs.os) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # Single source of truth for the Go version: go.mod.
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ inputs.golangci_version }}
+          args: --config=${{ inputs.golangci_path }} --timeout=${{ inputs.timeout }} ./...
