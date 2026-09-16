@@ -24,8 +24,12 @@ SHIM_LDFLAGS := -s -w -X main.version=$(VERSION)
 .DEFAULT_GOAL := check
 
 ## check: run every CI check, in CI's order
+#
+# shim comes before test on purpose: the tests that check an embedded build is for
+# the architecture it is named for skip when there is nothing embedded, so running
+# them first would report green for a matrix that was never built.
 .PHONY: check
-check: fmt-check tidy-check vet build test
+check: fmt-check tidy-check vet build shim test binary
 
 ## build: compile every package
 .PHONY: build
