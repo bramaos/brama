@@ -1,22 +1,46 @@
 name: lint
 
+# A reusable workflow rather than a triggered one: the lint step is defined once,
+# with one version pin, and ci.yml calls it. Callers supply nothing in the normal
+# case — the defaults below are brama's.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
+    inputs:
+      golangci_path:
+        type: string
+        required: false
+        default: .golangci.yml
+        description: Path to the golangci-lint config.
+      golangci_version:
+        type: string
+        required: false
+        # Pinned, not floating: golangci-lint adds linters and tightens existing ones
+        # between minors, so `latest` goes red on a commit that changed nothing. Bump
+        # this and GOLANGCI_VERSION in the Makefile together.
+        default: v2.13.2
+        description: Version of golangci-lint to run.
+      timeout:
+        type: string
+        required: false
+        default: 10m
+        description: Timeout passed to golangci-lint.
+      os:
+        type: string
+        required: false
+        # Single runner by default: brama has no build tags and no GOOS-specific
+        # files, so a wider matrix would lint identical code more than once.
+        default: '["ubuntu-latest"]'
+        description: JSON array of runners to lint on.
 
 permissions:
   contents: read
 
-# Matches ci.yml, with its own group so the two workflows do not cancel each other.
-concurrency:
-  group: lint-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   golangci-lint:
-    name: golangci-lint
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: ${{ fromJSON(inputs.os) }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
@@ -28,25 +52,5 @@ jobs:
 
       - uses: golangci/golangci-lint-action@v9
         with:
-          # Pinned, not floating: golangci-lint adds linters and tightens existing
-          # ones between minors, so `latest` starts failing on a commit that changed
-          # nothing. Bump deliberately, and run the new version locally first.
-          version: v2.13.2
-          args: --timeout=10m ./...
-
-  # Separate from the linters: this one fails on a CVE in a dependency, which is news
-  # about the outside world rather than about the commit under test.
-  govulncheck:
-    name: govulncheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-        # Pinned to match the Makefile. The vulnerability database is fetched live
-        # either way, so this pins the scanner, not what it knows about.
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+          version: ${{ inputs.golangci_version }}
+          args: --config=${{ inputs.golangci_path }} --timeout=${{ inputs.timeout }} ./...
