@@ -14,11 +14,13 @@ on:
       golangci_version:
         type: string
         required: false
-        # Pinned, not floating: golangci-lint adds linters and tightens existing ones
-        # between minors, so `latest` goes red on a commit that changed nothing. Bump
-        # this and GOLANGCI_VERSION in the Makefile together.
-        default: v2.13.2
-        description: Version of golangci-lint to run.
+        # Empty means "ask the Makefile". The pin lives in GOLANGCI_VERSION there
+        # and nowhere else, so a bump is one edit rather than two that can be made
+        # separately and disagree. A caller outside brama can still pass a version.
+        default: ''
+        description: >-
+          Version of golangci-lint to run. Empty reads GOLANGCI_VERSION from the
+          Makefile.
       timeout:
         type: string
         required: false
@@ -38,19 +40,37 @@ permissions:
 jobs:
   golangci-lint:
     strategy:
+      fail-fast: false
       matrix:
         os: ${{ fromJSON(inputs.os) }}
     runs-on: ${{ matrix.os }}
+    # golangci-lint on a cold cache takes about three minutes. Ten is room for a
+    # slow runner; past that the job is hung, and a hung job holds a runner for six
+    # hours by default.
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      # Actions are pinned to a commit, not a tag: a tag can be moved to point at
+      # different code, and these run with a token in the environment. Dependabot
+      # bumps the SHA and rewrites the comment, so the version stays readable.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes. Leaving the token in .git/config would make it
+          # reachable from any command the linters run.
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # Single source of truth for the Go version: go.mod.
           go-version-file: go.mod
           cache: true
 
-      - uses: golangci/golangci-lint-action@v9
+      # Reads the pin out of the Makefile so this workflow does not hold a copy of
+      # it. Skipped when a caller passed a version explicitly.
+      - id: pin
+        if: inputs.golangci_version == ''
+        run: echo "version=$(make print-GOLANGCI_VERSION)" >>"$GITHUB_OUTPUT"
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: ${{ inputs.golangci_version }}
+          version: ${{ inputs.golangci_version || steps.pin.outputs.version }}
           args: --config=${{ inputs.golangci_path }} --timeout=${{ inputs.timeout }} ./...
