@@ -258,6 +258,21 @@ Irreversibility alone does not make a dataset anonymous. A row with `birth_date`
 
 The Shim is the Brama component that runs on a Server. It is uploaded over SSH, per architecture, and runs only for the duration of an operation. It is not an agent and not a daemon.
 
+It lives at `~/.brama/shim`, in the home directory of the SSH user — server-global, not per-Environment, because one binary serves every Environment on the box. `brama server add` installs it as part of registering a Server. See [ADR 0006](adr/0006-server-global-shim-home.md).
+
+The builds are **embedded in the `brama` binary** and streamed down the connection that is already open. Nothing is fetched at install time: a Server's outbound network is the last thing Brama should need to widen, and an embedded build cannot disagree with the CLI that sent it. Brama ships `linux/amd64` and `linux/arm64`; a Server reporting anything else fails with the platform it detected, and that is a failure (exit 1), not a Refusal.
+
+Installed builds are versioned, with a symlink at the path operations execute:
+
+```
+~/.brama/
+├── shim -> shim-0.1.1
+├── shim-0.1.0
+└── shim-0.1.1
+```
+
+The swap is a rename, so an interrupted upload leaves the previous Shim intact rather than a half-written one at the live path. Two builds are kept. A Shim already installed at the CLI's version is not re-sent — but it is still run, because executing it is what proves the install rather than what the filesystem claims about it.
+
 It upgrades itself when the CLI is newer, as its **own visible step before the operation**, never mid-operation. The upgrade prints what changed and is recorded in `state.json`. `--dry-run` shows a pending upgrade rather than performing it.
 
 In v0.2, when deployment ships, the Shim receives **structured operations** rather than shell commands:
@@ -278,12 +293,15 @@ This makes "no arbitrary remote shell execution" structurally true rather than a
 │   ├── .env
 │   └── uploads/
 └── .brama/
-    ├── shim
     ├── state.json
     └── policy.json                          # v0.2
+
+~/.brama/                                    # the SSH user's home
+├── shim -> shim-0.1.1
+└── shim-0.1.1
 ```
 
-`state.json` is the Server-side source of truth: operation history, Shim version, and — from v0.2 — Deployment records.
+`state.json` is the Server-side source of truth: operation history, Shim version, and — from v0.2 — Deployment records. It stays under the Environment it describes; only the Shim binary is server-global.
 
 ### State ownership
 
