@@ -21,6 +21,13 @@ LDFLAGS := -X main.version=$(VERSION)
 # it shipped against what answers on the server, so the two come from one build.
 SHIM_LDFLAGS := -s -w -X main.version=$(VERSION)
 
+# Pinned to match .github/workflows/lint.yml. golangci-lint adds linters and tightens
+# existing ones between minors, so a floating version fails on a commit that changed
+# nothing. Bump both together.
+GOLANGCI_VERSION ?= v2.13.2
+GOLANGCI := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+GOVULNCHECK := $(GO) run golang.org/x/vuln/cmd/govulncheck@latest
+
 .DEFAULT_GOAL := check
 
 ## check: run every CI check, in CI's order
@@ -28,8 +35,11 @@ SHIM_LDFLAGS := -s -w -X main.version=$(VERSION)
 # shim comes before test on purpose: the tests that check an embedded build is for
 # the architecture it is named for skip when there is nothing embedded, so running
 # them first would report green for a matrix that was never built.
+#
+# vuln is last because it is the only check that reports on the outside world rather
+# than on the tree: it can go red on a commit that changed nothing.
 .PHONY: check
-check: fmt-check tidy-check vet build shim test binary
+check: fmt-check tidy-check vet lint build shim test binary vuln
 
 ## build: compile every package
 .PHONY: build
@@ -61,6 +71,22 @@ test:
 .PHONY: vet
 vet:
 	$(GO) vet $(PKG)
+
+## lint: run golangci-lint
+.PHONY: lint
+lint:
+	$(GOLANGCI) run $(PKG)
+
+## lint-fix: apply the fixes golangci-lint can make on its own
+.PHONY: lint-fix
+lint-fix:
+	$(GOLANGCI) run --fix $(PKG)
+	$(GOLANGCI) fmt
+
+## vuln: report known vulnerabilities in dependencies
+.PHONY: vuln
+vuln:
+	$(GOVULNCHECK) $(PKG)
 
 ## fmt: rewrite source files to gofmt style
 .PHONY: fmt
