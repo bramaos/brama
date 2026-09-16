@@ -26,7 +26,8 @@ SHIM_LDFLAGS := -s -w -X main.version=$(VERSION)
 # nothing. Bump both together.
 GOLANGCI_VERSION ?= v2.13.2
 GOLANGCI := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
-GOVULNCHECK := $(GO) run golang.org/x/vuln/cmd/govulncheck@latest
+GOVULNCHECK_VERSION ?= v1.8.0
+GOVULNCHECK := $(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
 .DEFAULT_GOAL := check
 

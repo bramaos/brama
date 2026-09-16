@@ -47,4 +47,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        # Pinned to match the Makefile. The vulnerability database is fetched live
+        # either way, so this pins the scanner, not what it knows about.
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
