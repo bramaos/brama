@@ -23,10 +23,14 @@ const Path = Home + "/shim"
 // the one to fall back to.
 const keptVersions = 2
 
-// Runner is the part of a Server connection this package needs. It is declared here,
-// where it is consumed, rather than by the transport — there is one real
-// implementation, and this is the only place that benefits from substituting it.
-type Runner interface {
+// Remote is the part of a Server this package needs: something commands run on.
+//
+// Declared here, where it is consumed, rather than by the transport — there is one
+// real implementation, and this is the only place that benefits from substituting
+// it. Deliberately not called Executor or Runner: CONTEXT.md reserves Executor for
+// the operation channel v0.2 introduces, which carries structured operations rather
+// than shell commands, and this is not that.
+type Remote interface {
 	// Run executes a command and returns its standard output.
 	Run(ctx context.Context, command string) (string, error)
 	// Send streams data to a command's standard input.
@@ -38,8 +42,8 @@ type Runner interface {
 // stays separable from where the bytes came from. Production passes Binary.
 type Source func(Platform) ([]byte, error)
 
-// Report is what an install did.
-type Report struct {
+// InstallResult is what an install did.
+type InstallResult struct {
 	// Platform is what the Server answered to `uname -sm`.
 	Platform Platform
 	// Version is the Shim that answered on the Server once the install finished.
@@ -55,41 +59,43 @@ type Report struct {
 // A matching version already installed is left alone: the transfer is skipped, but
 // the verification is not, because running it is what proves the install rather than
 // what the filesystem claims about it.
-func Install(ctx context.Context, r Runner, version string, src Source) (Report, error) {
+func Install(ctx context.Context, r Remote, version string, src Source) (InstallResult, error) {
 	platform, err := detectPlatform(ctx, r)
 	if err != nil {
-		return Report{}, err
+		return InstallResult{}, err
 	}
 
 	if installed, err := installedVersion(ctx, r); err == nil && installed == version {
-		return Report{Platform: platform, Version: installed, Uploaded: false}, nil
+		return InstallResult{Platform: platform, Version: installed, Uploaded: false}, nil
 	}
 
 	data, err := src(platform)
 	if err != nil {
-		return Report{Platform: platform}, err
+		// Named here rather than by the caller: "unsupported platform" without the
+		// platform leaves the user nothing to report.
+		return InstallResult{Platform: platform}, fmt.Errorf("%w (server is %s)", err, platform)
 	}
 
 	staged := stagedPath(version)
 	if err := r.Send(ctx, "mkdir -p "+Home+" && cat > "+staged, data); err != nil {
-		return Report{Platform: platform}, fmt.Errorf("uploading the shim: %w", err)
+		return InstallResult{Platform: platform}, fmt.Errorf("uploading the shim: %w", err)
 	}
 	if _, err := r.Run(ctx, installScript(version)); err != nil {
-		return Report{Platform: platform}, fmt.Errorf("installing the shim: %w", err)
+		return InstallResult{Platform: platform}, fmt.Errorf("installing the shim: %w", err)
 	}
 
 	installed, err := installedVersion(ctx, r)
 	if err != nil {
-		return Report{Platform: platform}, fmt.Errorf("the shim was installed but does not run: %w", err)
+		return InstallResult{Platform: platform}, fmt.Errorf("the shim was installed but does not run: %w", err)
 	}
 	if installed != version {
-		return Report{Platform: platform}, fmt.Errorf(
+		return InstallResult{Platform: platform}, fmt.Errorf(
 			"installed shim reports version %q, but %q was sent", installed, version)
 	}
-	return Report{Platform: platform, Version: installed, Uploaded: true}, nil
+	return InstallResult{Platform: platform, Version: installed, Uploaded: true}, nil
 }
 
-func detectPlatform(ctx context.Context, r Runner) (Platform, error) {
+func detectPlatform(ctx context.Context, r Remote) (Platform, error) {
 	out, err := r.Run(ctx, "uname -sm")
 	if err != nil {
 		return Platform{}, fmt.Errorf("asking the server what it is: %w", err)
@@ -100,7 +106,7 @@ func detectPlatform(ctx context.Context, r Runner) (Platform, error) {
 // installedVersion asks the Shim on the Server what it is. An absent or unrunnable
 // Shim is an error here, not an empty string: the caller's next move is to install
 // one either way, and a blank version must never be mistaken for a match.
-func installedVersion(ctx context.Context, r Runner) (string, error) {
+func installedVersion(ctx context.Context, r Remote) (string, error) {
 	out, err := r.Run(ctx, Path+" --version")
 	if err != nil {
 		return "", err
@@ -121,11 +127,13 @@ func installedVersion(ctx context.Context, r Runner) (string, error) {
 // executes.
 func installScript(version string) string {
 	var (
-		staged   = stagedPath(version)
-		final    = versionedPath(version)
-		tmpLink  = Home + "/.shim.new"
+		staged  = stagedPath(version)
+		final   = versionedPath(version)
+		tmpLink = Home + "/.shim.new"
+		// Portable on purpose: `xargs -r` is GNU-only, and a Server running Alpine
+		// is still linux/amd64 as far as the build matrix is concerned.
 		pruneOld = fmt.Sprintf(
-			"ls -1t %s/shim-* 2>/dev/null | tail -n +%d | xargs -r rm -f",
+			"ls -1t %s/shim-* 2>/dev/null | tail -n +%d | while read -r old; do rm -f \"$old\"; done",
 			Home, keptVersions+1)
 	)
 
@@ -134,7 +142,9 @@ func installScript(version string) string {
 		"chmod 0755 " + staged,
 		"mv -f " + staged + " " + final,
 		"ln -sfn " + fileName(version) + " " + tmpLink,
-		"mv -T " + tmpLink + " " + Path,
+		// Plain mv, not `mv -T`: -T is GNU-only, and it is only needed when the
+		// destination is a directory. Path is a symlink to a regular file.
+		"mv " + tmpLink + " " + Path,
 		pruneOld,
 	}, " && ")
 }

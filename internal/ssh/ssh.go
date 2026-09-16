@@ -40,9 +40,14 @@ type Target struct {
 
 // Open authenticates once and holds the connection open for the caller's lifetime.
 //
-// The control socket lives in a directory of its own, removed on Close — including
-// on the error paths. A predictable path shared between runs would leave a live,
-// authenticated channel to production sitting around after the command returns.
+// The control socket lives in a directory of its own, removed on Close. A
+// predictable path shared between runs would leave a live, authenticated channel to
+// production sitting around after the command returns, which is also why the master
+// is started with ControlPersist=no.
+//
+// Close still has to run for that to hold: the master is backgrounded by ssh itself,
+// so it outlives a brama that is killed outright. The caller passes a context wired
+// to SIGINT and SIGTERM, which covers everything short of SIGKILL.
 func Open(ctx context.Context, t Target) (*Session, error) {
 	if t.Host == "" {
 		return nil, fmt.Errorf("no host to connect to")
@@ -62,6 +67,9 @@ func Open(ctx context.Context, t Target) (*Session, error) {
 
 	args := append(s.baseArgs(),
 		"-o", "ControlMaster=yes",
+		// Without this a wrong or unreachable host hangs on the TCP timeout, which
+		// on some networks is minutes.
+		"-o", "ConnectTimeout=10",
 		// The master must not outlive the operation that opened it.
 		"-o", "ControlPersist=no",
 		"-N", "-f",
