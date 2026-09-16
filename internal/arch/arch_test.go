@@ -29,6 +29,8 @@ func TestCoreDoesNotImportARenderer(t *testing.T) {
 		"internal/refusal",
 		"internal/shim",
 		"internal/ssh",
+		"internal/state",
+		"internal/version",
 	}
 
 	forbidden := []string{
