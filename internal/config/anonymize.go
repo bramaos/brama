@@ -16,6 +16,8 @@ const (
 	Drop Classification = "drop"
 )
 
+// Valid reports whether c is one of the three classifications. Anything else is a
+// typo in the config, and an unclassified column is what `anonymize check` refuses on.
 func (c Classification) Valid() bool {
 	return c == Fake || c == Keep || c == Drop
 }
@@ -51,13 +53,12 @@ type Table struct {
 	Columns       map[string]Classification `yaml:"-"`
 }
 
-// reservedTableKeys are the keys that configure a Table rather than classify a column.
-// A column genuinely named "discriminator" or "keys" would collide; that is accepted,
-// and `anonymize check` is where such a collision would surface.
-var reservedTableKeys = map[string]bool{"discriminator": true, "keys": true}
-
 // UnmarshalYAML accepts both Table shapes. Any key that is not `discriminator` or
 // `keys` is read as a column name.
+//
+// Those two keys configure a Table rather than classify a column, so a column
+// genuinely named "discriminator" or "keys" would collide. That is accepted, and
+// `anonymize check` is where such a collision would surface.
 func (t *Table) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw map[string]any
 	if err := unmarshal(&raw); err != nil {
