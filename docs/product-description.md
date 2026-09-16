@@ -275,6 +275,8 @@ The swap is a rename, so an interrupted upload leaves the previous Shim intact r
 
 It upgrades itself when the CLI is newer, as its **own visible step before the operation**, never mid-operation. The upgrade prints what changed, and from the first operation that names an Environment it is recorded in that Environment's `state.json`. `brama server add` names no Environment, so its install is reported in the result and recorded nowhere — the installed version is readable from the Server at any time, since the symlink target carries it.
 
+The step names one of four outcomes — `none`, `install`, `upgrade`, `replace`. A Shim that differs from the CLI's build but is not older than it — a Server a newer `brama` reached first, or either side built outside a tagged tree — is **replaced**, not refused: the Shim and the CLI must come from one build, and a Shim the CLI cannot drive protects nothing. See `docs/adr/0007-replace-a-shim-brama-cannot-call-older.md`. `--dry-run` reports the step it would take and takes none of it, which is the only way to see a pending upgrade before it happens.
+
 In v0.2, when deployment ships, the Shim receives **structured operations** rather than shell commands:
 
 ```
@@ -433,10 +435,13 @@ servers:
 
 Authentication resolves through `~/.ssh/config`, `ssh-agent`, and hardware keys.
 
-`brama server add` is the exception: its substance is remote — it installs the Shim — so a dry
-run that skipped the install would verify nothing, and one that performed it would not be dry.
-It has no `--dry-run`. The Server is reached before anything is written either way, so there is
-no half state to preview.
+`brama server add` supports `--dry-run`, and the reasoning that once said it should not is worth
+keeping: its substance is remote — it installs the Shim — so a dry run that skipped the install
+would verify nothing, and one that performed it would not be dry. What changed is that the
+version check gave the dry run something of its own to say. It connects, and it answers *which
+Shim does this Server already run, and what would brama do about it* — a question that cannot be
+answered from `brama.yaml`, and the only way to see a pending upgrade before it happens. It
+sends nothing and writes nothing, in `brama.yaml` or on the Server.
 
 ### `--dry-run`
 
