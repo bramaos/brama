@@ -129,10 +129,7 @@ func runInit(env *console, root, adapterName string, dryRun bool) error {
 
 	body := scaffold.Skeleton(result)
 	if !dryRun {
-		// 0644, not 0600: brama.yaml is desired state committed to git (ADR-0005) and
-		// holds no secrets, so it is readable by anything that can read the checkout.
-		//nolint:gosec // G306: see above — a committed, secret-free config file.
-		if err := os.WriteFile(target, body, 0o644); err != nil {
+		if err := os.WriteFile(target, body, config.FileMode); err != nil {
 			return fmt.Errorf("writing %s: %w", config.Filename, err)
 		}
 	}

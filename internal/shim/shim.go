@@ -47,6 +47,7 @@ func (p Platform) filename() string { return "bin/shim-" + p.OS + "-" + p.Arch }
 const (
 	archAMD64 = "amd64"
 	archARM64 = "arm64"
+	arch386   = "386"
 )
 
 // SupportedPlatforms is the matrix brama builds for.
@@ -103,12 +104,12 @@ func Binary(p Platform) ([]byte, error) {
 // which is more useful than "unrecognised".
 var unameArch = map[string]string{
 	"x86_64":  archAMD64,
-	archAMD64: archAMD64,
+	"amd64":   archAMD64,
 	"aarch64": archARM64,
-	archARM64: archARM64,
-	"i686":    "386",
-	"i386":    "386",
-	"x86":     "386",
+	"arm64":   archARM64,
+	"i686":    arch386,
+	"i386":    arch386,
+	"x86":     arch386,
 }
 
 // ParsePlatform reads the output of `uname -sm`.

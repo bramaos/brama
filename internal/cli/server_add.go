@@ -196,10 +196,8 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 		return fmt.Errorf("installing the shim on %s: %w", name, err)
 	}
 
-	// 0644, not 0600: brama.yaml is desired state committed to git (ADR-0005) and
-	// holds no secrets, so it is readable by anything that can read the checkout.
-	//nolint:gosec // G306: see above — a committed, secret-free config file.
-	if err := os.WriteFile(path, updated, 0o644); err != nil {
+	//nolint:gosec // G306: config.FileMode documents why 0644 is right here.
+	if err := os.WriteFile(path, updated, config.FileMode); err != nil {
 		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
 	}
 
