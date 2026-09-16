@@ -31,7 +31,7 @@ environments:
 
 servers:
   prod:
-    host: elements-prod
+    host: example-prod
     user: deploy
 `
 
@@ -47,8 +47,8 @@ func TestParseValid(t *testing.T) {
 	if got := cfg.App.Paths.Uploads; got != "web/app/uploads" {
 		t.Errorf("App.Paths.Uploads = %q, want web/app/uploads", got)
 	}
-	if got := cfg.Servers["prod"].Host; got != "elements-prod" {
-		t.Errorf("Servers[prod].Host = %q, want elements-prod", got)
+	if got := cfg.Servers["prod"].Host; got != "example-prod" {
+		t.Errorf("Servers[prod].Host = %q, want example-prod", got)
 	}
 }
 
@@ -155,7 +155,7 @@ func TestValidate(t *testing.T) {
 		},
 		{
 			name:    "server without a host",
-			mutate:  func(s string) string { return strings.Replace(s, "    host: elements-prod\n", "", 1) },
+			mutate:  func(s string) string { return strings.Replace(s, "    host: example-prod\n", "", 1) },
 			wantErr: "servers.prod.host is required",
 		},
 		{

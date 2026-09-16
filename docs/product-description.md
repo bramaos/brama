@@ -392,7 +392,7 @@ environments:
 
 servers:
   prod:
-    host: elements-prod
+    host: example-prod
     user: deploy
 
 anonymize:
@@ -445,7 +445,7 @@ nothing:
 
 ```
 Environment:       production
-Server:            elements-prod
+Server:            example-prod
 Adapter:           wordpress (bedrock)
 Shim:              v0.1.2 -> v0.1.4 (will upgrade)
 Tables:            63

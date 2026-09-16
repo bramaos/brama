@@ -36,7 +36,7 @@ Nobody moves the data **and** anonymizes it **before it leaves the source server
 ```console
 $ brama db pull production local
 
-  Server            elements-prod
+  Server            example-prod
   Adapter           wordpress (bedrock)
   Tables            63 · all classified
   Anonymizing       41 columns, 184,203 rows
