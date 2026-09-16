@@ -36,4 +36,9 @@ See `docs/agents/changelog.md` for how entries are written.
 
 - `brama` now exits `1` rather than `2` for an unknown command or a bad flag.
 
+### Security
+
+- Update `golang.org/x/text` to 0.39.0, closing an infinite loop on malformed input
+  that `brama` could reach while rendering styled output (GO-2026-5970).
+
 [unreleased]: https://github.com/bramaos/brama/commits/main
