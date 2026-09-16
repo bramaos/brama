@@ -253,7 +253,12 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 	}
 
 	if !dryRun {
-		if err := os.WriteFile(path, updated, 0o644); err != nil {
+		// gosec traces path back to the directory brama was run in and calls it
+		// traversal. It is the brama.yaml config.Find located and line 205 read: the
+		// command's whole job is to write the file back where it found it.
+		//
+		//nolint:gosec // G703: path is config.Find's result, not caller-supplied.
+		if err := os.WriteFile(path, updated, config.FileMode); err != nil {
 			return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
 		}
 	}
@@ -265,5 +270,9 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 		Platform: step.Platform.String(),
 		Shim:     step,
 		DryRun:   dryRun,
-	})
+	}); err != nil {
+		return fmt.Errorf("rendering the server add result: %w", err)
+	}
+
+	return nil
 }
