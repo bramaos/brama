@@ -32,6 +32,29 @@ var (
 	fixStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 )
 
+// lineWriter latches the first write error. A single render is many writes, and
+// checking each one at the call site would bury the layout the code exists to
+// express — so a failed write stops the rest and is returned once, at the end.
+type lineWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (lw *lineWriter) printf(format string, v ...any) {
+	if lw.err != nil {
+		return
+	}
+	_, lw.err = lipgloss.Fprintf(lw.w, format, v...)
+}
+
+func (lw *lineWriter) println(v ...any) {
+	if lw.err != nil {
+		return
+	}
+	_, lw.err = lipgloss.Fprintln(lw.w, v...)
+}
+
+// Result writes the fields as a padded table, then the headline.
 func (h *Human) Result(r Result) error {
 	fields := r.Fields()
 	width := 0
@@ -41,15 +64,16 @@ func (h *Human) Result(r Result) error {
 		}
 	}
 
-	lipgloss.Fprintln(h.Out)
+	out := &lineWriter{w: h.Out}
+	out.println()
 	for _, f := range fields {
 		label := labelStyle.Render(pad(f.Label, width))
-		lipgloss.Fprintf(h.Out, "  %s  %s\n", label, humanValue(f))
+		out.printf("  %s  %s\n", label, humanValue(f))
 	}
 
 	if noted, ok := r.(Noted); ok {
 		for _, note := range noted.Notes() {
-			lipgloss.Fprintf(h.Out, "\n  %s\n", noteStyle.Render(note))
+			out.printf("\n  %s\n", noteStyle.Render(note))
 		}
 	}
 
@@ -57,24 +81,28 @@ func (h *Human) Result(r Result) error {
 	if r.Status() == StatusPartial {
 		glyph = refusedStyle.Render("!")
 	}
-	lipgloss.Fprintf(h.Out, "\n  %s %s\n\n", glyph, r.Headline())
-	return nil
+	out.printf("\n  %s %s\n\n", glyph, r.Headline())
+	return out.err
 }
 
 // Refused renders a declined operation. It is deliberately not styled as a failure:
 // nothing went wrong, a guardrail held, and the output says what would clear it.
 func (h *Human) Refused(_ string, r *refusal.Refusal) error {
-	lipgloss.Fprintf(h.Err, "\n  %s %s\n", refusedStyle.Render("✗ refused —"), r.Detail)
+	out := &lineWriter{w: h.Err}
+	out.printf("\n  %s %s\n", refusedStyle.Render("✗ refused —"), r.Detail)
 	if r.Fix != "" {
-		lipgloss.Fprintf(h.Err, "    %s %s\n", labelStyle.Render("run:"), fixStyle.Render(r.Fix))
+		out.printf("    %s %s\n", labelStyle.Render("run:"), fixStyle.Render(r.Fix))
 	}
-	lipgloss.Fprintln(h.Err)
-	return nil
+	out.println()
+	return out.err
 }
 
+// Error renders a failure. The action is ignored: a person reading the terminal
+// already knows which command they ran.
 func (h *Human) Error(_ string, err error) error {
-	lipgloss.Fprintf(h.Err, "\n  %s %s\n\n", errorStyle.Render("✗"), err.Error())
-	return nil
+	out := &lineWriter{w: h.Err}
+	out.printf("\n  %s %s\n\n", errorStyle.Render("✗"), err.Error())
+	return out.err
 }
 
 // humanValue renders a field value for a person. A list is joined rather than shown

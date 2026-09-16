@@ -2,6 +2,7 @@ package renderer
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 
 	"github.com/bramaos/brama/internal/refusal"
@@ -19,10 +20,18 @@ type JSON struct {
 // NewJSON returns a renderer writing the machine contract to w.
 func NewJSON(w io.Writer) *JSON { return &JSON{Out: w} }
 
+// The two keys every payload carries, named once because all three shapes — result,
+// refusal, error — have to agree on them for a caller to branch on `status`.
+const (
+	keyAction = "action"
+	keyStatus = "status"
+)
+
+// Result writes a completed operation: the two contract keys, then one key per Field.
 func (j *JSON) Result(r Result) error {
 	payload := map[string]any{
-		"action": r.Action(),
-		"status": string(r.Status()),
+		keyAction: r.Action(),
+		keyStatus: string(r.Status()),
 	}
 	for _, f := range r.Fields() {
 		payload[f.Key] = contractValue(f.Value)
@@ -35,9 +44,9 @@ func (j *JSON) Result(r Result) error {
 // rather than by reading the message.
 func (j *JSON) Refused(action string, r *refusal.Refusal) error {
 	payload := map[string]any{
-		"action": action,
-		"status": "refused",
-		"reason": string(r.Reason),
+		keyAction: action,
+		keyStatus: "refused",
+		"reason":  string(r.Reason),
 	}
 	if r.Detail != "" {
 		payload["detail"] = r.Detail
@@ -48,11 +57,12 @@ func (j *JSON) Refused(action string, r *refusal.Refusal) error {
 	return j.write(payload)
 }
 
+// Error writes a failure, with the message as `detail`.
 func (j *JSON) Error(action string, err error) error {
 	return j.write(map[string]any{
-		"action": action,
-		"status": "error",
-		"detail": err.Error(),
+		keyAction: action,
+		keyStatus: "error",
+		"detail":  err.Error(),
 	})
 }
 
@@ -69,5 +79,8 @@ func contractValue(v any) any {
 func (j *JSON) write(payload map[string]any) error {
 	enc := json.NewEncoder(j.Out)
 	enc.SetIndent("", "  ")
-	return enc.Encode(payload)
+	if err := enc.Encode(payload); err != nil {
+		return fmt.Errorf("writing the %s result: %w", payload[keyAction], err)
+	}
+	return nil
 }

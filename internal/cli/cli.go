@@ -49,12 +49,20 @@ type console struct {
 
 // writeSkeletonPreview prints a generated file for --dry-run. Human output only:
 // the machine contract reports what would be written as fields, not as a blob.
-func (e *console) writeSkeletonPreview(body []byte) {
+//
+// The write error is returned rather than dropped: under --dry-run this body is the
+// entire output, so failing to print it means the command produced nothing.
+func (e *console) writeSkeletonPreview(body []byte) error {
 	if e.JSON {
-		return
+		return nil
 	}
-	fmt.Fprintln(e.Out, strings.TrimRight(string(body), "\n"))
-	fmt.Fprintln(e.Out)
+	if _, err := fmt.Fprintln(e.Out, strings.TrimRight(string(body), "\n")); err != nil {
+		return fmt.Errorf("writing the preview: %w", err)
+	}
+	if _, err := fmt.Fprintln(e.Out); err != nil {
+		return fmt.Errorf("writing the preview: %w", err)
+	}
+	return nil
 }
 
 // Main runs brama and returns the process exit code.
@@ -107,8 +115,9 @@ func Main(version string) int {
 	}
 
 	// A renderer only exists once flags have parsed; a usage error fails before that.
+	// Nothing to do if even this write fails — the exit code still carries the news.
 	if env.Renderer == nil {
-		fmt.Fprintln(env.Err, "brama:", err)
+		_, _ = fmt.Fprintln(env.Err, "brama:", err)
 		return ExitError
 	}
 

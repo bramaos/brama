@@ -24,7 +24,7 @@ var ErrNotFound = errors.New("no " + Filename + " found")
 func Find(startDir string) (string, error) {
 	dir, err := filepath.Abs(startDir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolving %s: %w", startDir, err)
 	}
 	for {
 		candidate := filepath.Join(dir, Filename)
@@ -49,7 +49,7 @@ func Load(startDir string) (*Config, string, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, path, err
+		return nil, path, fmt.Errorf("reading %s: %w", path, err)
 	}
 	cfg, err := Parse(data)
 	if err != nil {

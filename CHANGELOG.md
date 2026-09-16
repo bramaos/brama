@@ -35,6 +35,13 @@ See `docs/agents/changelog.md` for how entries are written.
 ### Changed
 
 - `brama` now exits `1` rather than `2` for an unknown command or a bad flag.
+- Error messages now name the step that failed: `reading brama.yaml: permission
+  denied` rather than `permission denied`.
+
+### Fixed
+
+- Report a failed write instead of finishing successfully, so a closed pipe or a full
+  disk is no longer silent.
 
 ### Security
 

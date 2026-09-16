@@ -109,7 +109,7 @@ func detectPlatform(ctx context.Context, r Remote) (Platform, error) {
 func installedVersion(ctx context.Context, r Remote) (string, error) {
 	out, err := r.Run(ctx, Path+" --version")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("asking %s for its version: %w", Path, err)
 	}
 	version := strings.TrimSpace(out)
 	if version == "" {
