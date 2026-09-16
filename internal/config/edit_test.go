@@ -71,7 +71,7 @@ app:
 	mustContain(t, out, "# No anonymize block yet.")
 }
 
-func TestAddServerRefusesANameAlreadyRegistered(t *testing.T) {
+func TestAddServerRejectsANameAlreadyRegistered(t *testing.T) {
 	doc := "version: 1\n\nservers:\n  prod:\n    host: hetzner-prod\n"
 
 	_, err := config.AddServer([]byte(doc), "prod", config.Server{Host: "somewhere-else"})

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +21,7 @@ import (
 // here, at the point of use, so internal/ssh can stay a concrete package with no
 // interface of its own to keep in step.
 type session interface {
-	shim.Runner
+	shim.Remote
 	Close() error
 }
 
@@ -59,7 +61,7 @@ type ServerAddResult struct {
 	Host     string
 	User     string
 	Platform string
-	Shim     shim.Report
+	Shim     shim.InstallResult
 }
 
 func (r *ServerAddResult) Action() string          { return "server_add" }
@@ -153,17 +155,32 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 	if err != nil {
 		return err
 	}
-	// Decided from the file alone, before anything is dialled: registering is not
-	// the verb for changing a reviewed decision.
-	if err := checkUnregistered(body, name, path); err != nil {
+	if _, err := config.Parse(body); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+
+	// The edited file is computed before anything is dialled, not after: it is what
+	// decides whether the name is free, and refusing a name already registered is a
+	// decision about the file that should cost nobody a handshake. Writing it is
+	// what waits for the Server.
+	updated, err := config.AddServer(body, name, srv)
+	if errors.Is(err, config.ErrServerExists) {
+		return fmt.Errorf("server %q is already registered — edit %s to change it", name, config.Filename)
+	}
+	if err != nil {
 		return err
 	}
 
-	if inst.embedded != nil && !inst.embedded() {
+	if !inst.embedded() {
 		return fmt.Errorf("%w — build one with `make binary`", shim.ErrNotBuilt)
 	}
 
-	ctx := context.Background()
+	// Wired to the interrupt signals so a Ctrl-C still runs the deferred Close: the
+	// ssh master is backgrounded, and one left alive is an authenticated channel to
+	// production nobody is watching.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	remote, err := inst.dial(ctx, ssh.Target{Host: srv.Host, User: srv.User})
 	if err != nil {
 		return err
@@ -172,13 +189,9 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 
 	report, err := shim.Install(ctx, remote, inst.version, inst.source)
 	if err != nil {
-		return describeInstallFailure(err, report)
-	}
-
-	updated, err := config.AddServer(body, name, srv)
-	if err != nil {
 		return err
 	}
+
 	if err := os.WriteFile(path, updated, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
 	}
@@ -190,27 +203,4 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 		Platform: report.Platform.String(),
 		Shim:     report,
 	})
-}
-
-// checkUnregistered reports whether the name is free, without modifying anything.
-func checkUnregistered(body []byte, name, path string) error {
-	cfg, err := config.Parse(body)
-	if err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	if existing, ok := cfg.Servers[name]; ok {
-		return fmt.Errorf(
-			"server %q is already registered (host: %s) — edit %s to change it",
-			name, existing.Host, config.Filename)
-	}
-	return nil
-}
-
-// describeInstallFailure names the platform brama found when it has no build for it.
-// "unsupported platform" without the platform leaves the user nothing to report.
-func describeInstallFailure(err error, report shim.Report) error {
-	if errors.Is(err, shim.ErrUnsupportedPlatform) && report.Platform.OS != "" {
-		return fmt.Errorf("%w — brama has no shim build for %s", err, report.Platform)
-	}
-	return err
 }

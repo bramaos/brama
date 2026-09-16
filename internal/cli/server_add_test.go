@@ -51,7 +51,7 @@ environments:
 // makes substituting it fair game.
 type fakeServer struct {
 	platform      string // what `uname -sm` answers
-	installed     string // version the Shim on the box reports; empty means none
+	installed     string // version the Shim on the Server reports; empty means none
 	uploadReports string // version a freshly installed Shim will report
 	runErr        error
 
@@ -112,7 +112,8 @@ func installerFor(f *fakeServer) (installer, *bool) {
 			dialled = true
 			return f, nil
 		},
-		source: fakeShimSource,
+		source:   fakeShimSource,
+		embedded: func() bool { return true },
 	}
 	return inst, &dialled
 }
@@ -218,9 +219,9 @@ func TestServerAddWithoutAConfigPointsAtInit(t *testing.T) {
 	}
 }
 
-// Refusing a duplicate is a decision about the file, so it is reached without
-// touching the Server.
-func TestServerAddRefusesADuplicateWithoutConnecting(t *testing.T) {
+// A name already registered is a decision about the file, so it is reached without
+// touching the Server. It is a failure (exit 1), not a Refusal.
+func TestServerAddRejectsADuplicateWithoutConnecting(t *testing.T) {
 	root := projectWithConfig(t)
 	remote := linuxServer()
 	inst, _ := installerFor(remote)
@@ -234,7 +235,7 @@ func TestServerAddRefusesADuplicateWithoutConnecting(t *testing.T) {
 	inst2, dialled := installerFor(second)
 	err := runServerAdd(env, root, "prod", config.Server{Host: "other"}, inst2)
 	if err == nil {
-		t.Fatal("second runServerAdd() = nil, want it to refuse a name already registered")
+		t.Fatal("second runServerAdd() = nil, want it to reject a name already registered")
 	}
 	if !strings.Contains(err.Error(), "already registered") {
 		t.Errorf("error = %q, want it to say the name is already registered", err)
@@ -288,7 +289,7 @@ func TestServerAddResultJSONContract(t *testing.T) {
 		Name:     "prod",
 		Host:     "hetzner-prod",
 		Platform: "linux/amd64",
-		Shim:     shim.Report{Version: testVersion, Uploaded: false},
+		Shim:     shim.InstallResult{Version: testVersion, Uploaded: false},
 	}
 	if err := env.Renderer.Result(result); err != nil {
 		t.Fatal(err)

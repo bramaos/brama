@@ -1,7 +1,7 @@
 // Package shim carries the Shim binaries brama installs on a Server.
 //
-// The builds are embedded rather than downloaded. A Server is the one machine whose
-// outbound network brama has no business widening, and an embedded binary cannot
+// The builds are embedded rather than downloaded. A Server's outbound network is the
+// last thing brama has any business widening, and an embedded binary cannot
 // disagree with the CLI that sent it — there is no version to negotiate, no release
 // to fetch, and no second channel into production to trust.
 //
@@ -25,7 +25,7 @@ import (
 var binaries embed.FS
 
 // Errors a caller distinguishes. Unsupported is permanent — brama has no build for
-// that machine. NotBuilt is this binary's problem, and `make binary` fixes it.
+// that Server. NotBuilt is this binary's problem, and `make binary` fixes it.
 var (
 	ErrUnsupportedPlatform = errors.New("no shim build for this platform")
 	ErrNotBuilt            = errors.New("this brama was built without shim binaries")
