@@ -59,38 +59,78 @@ func sshInstaller(version string) installer {
 	}
 }
 
+// shimStep runs the Shim's version check against a Server, or reports what it would
+// do. Both read the Server; only one of them writes to it.
+func (i installer) shimStep(ctx context.Context, r shim.Remote, dryRun bool) (shim.Step, error) {
+	if dryRun {
+		return shim.Plan(ctx, r, i.version, i.source)
+	}
+	return shim.Ensure(ctx, r, i.version, i.source)
+}
+
 // ServerAddResult is what `brama server add` produces.
 type ServerAddResult struct {
 	Name     string
 	Host     string
 	User     string
 	Platform string
-	Shim     shim.InstallResult
+	Shim     shim.Step
+	DryRun   bool
 }
 
 func (r *ServerAddResult) Action() string          { return "server_add" }
 func (r *ServerAddResult) Status() renderer.Status { return renderer.StatusSuccess }
 
 func (r *ServerAddResult) Headline() string {
-	installed := "shim already current"
-	if r.Shim.Uploaded {
-		installed = "shim installed"
+	if r.DryRun {
+		return "dry run — " + shimHeadline(r.Shim) + ", and " + r.Name +
+			" would be registered in " + config.Filename + " — nothing was written"
 	}
-	return "registered " + r.Name + " — " + installed +
+	return "registered " + r.Name + " — " + shimHeadline(r.Shim) +
 		" — next: add an environment for it in " + config.Filename
+}
+
+// shimHeadline says what the version check did, in the words a person reading one
+// line needs: which way the Shim moved, and whether it has moved yet.
+func shimHeadline(step shim.Step) string {
+	var verb string
+	switch step.Change {
+	case shim.ChangeNone:
+		return "shim already current at " + step.To
+	case shim.ChangeInstall:
+		verb = "installed"
+	case shim.ChangeUpgrade:
+		verb = "upgraded"
+	case shim.ChangeReplace:
+		verb = "replaced"
+	default:
+		verb = string(step.Change)
+	}
+	if step.Pending {
+		verb = "will be " + verb
+	}
+
+	if step.From == "" {
+		return "shim " + verb + " at " + step.To
+	}
+	return "shim " + verb + " " + step.From + " → " + step.To
 }
 
 // Fields carry raw values. shim_uploaded is the difference between "brama put this
 // here" and "it was already here", which is what a caller registering the same
-// Server from a second project needs to see.
+// Server from a second project needs to see; shim_change is what the difference
+// amounted to, and under --dry-run it is what the difference would amount to.
 func (r *ServerAddResult) Fields() []renderer.Field {
 	return renderer.Fields{}.
 		Add("server", "Server", r.Name).
 		Add("host", "Host", r.Host).
 		AddOptional("user", "User", r.User, "from ~/.ssh/config").
 		Add("platform", "Platform", r.Platform).
-		Add("shim_version", "Shim version", r.Shim.Version).
-		Add("shim_uploaded", "Shim uploaded", r.Shim.Uploaded)
+		AddOptional("shim_version", "Shim version", r.Shim.Running(), "none installed").
+		AddOptional("shim_previous_version", "Shim was", r.Shim.From, "none installed").
+		Add("shim_change", "Shim change", string(r.Shim.Change)).
+		Add("shim_uploaded", "Shim uploaded", r.Shim.Uploaded()).
+		Add("dry_run", "Dry run", r.DryRun)
 }
 
 func newServerCmd(env *console, version string) *cobra.Command {
@@ -103,7 +143,10 @@ func newServerCmd(env *console, version string) *cobra.Command {
 }
 
 func newServerAddCmd(env *console, version string) *cobra.Command {
-	var host, user string
+	var (
+		host, user string
+		dryRun     bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "add <name>",
@@ -114,7 +157,9 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 			"hostname, an IP, or a ~/.ssh/config alias, and identity comes from ssh-agent and\n" +
 			"~/.ssh/config. brama stores no credentials.\n\n" +
 			"The server is reached before anything is written, so a registered server is\n" +
-			"always one that answered.",
+			"always one that answered.\n\n" +
+			"--dry-run still connects — reporting which shim a server runs is the point of\n" +
+			"it — but sends nothing and writes nothing.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -123,7 +168,7 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 				return fmt.Errorf("finding the working directory: %w", err)
 			}
 			srv := config.Server{Host: host, User: user}
-			return runServerAdd(env, dir, args[0], srv, sshInstaller(version))
+			return runServerAdd(env, dir, args[0], srv, sshInstaller(version), dryRun)
 		},
 	}
 
@@ -131,6 +176,8 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 		"the ssh target: a hostname, an IP, or a ~/.ssh/config alias")
 	cmd.Flags().StringVar(&user, "user", "",
 		"the ssh user (optional — without it, OpenSSH decides)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
+		"report what the shim step would do, and change nothing")
 	_ = cmd.MarkFlagRequired("host")
 
 	return cmd
@@ -142,7 +189,7 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 // connection is opened, and the file is written only once the Server has answered.
 // A servers: entry therefore always means "reachable, and the shim runs here" —
 // which is the whole reason the probe exists.
-func runServerAdd(env *console, dir, name string, srv config.Server, inst installer) error {
+func runServerAdd(env *console, dir, name string, srv config.Server, inst installer, dryRun bool) error {
 	if srv.Host == "" {
 		return errors.New("--host is required — the ssh target to register")
 	}
@@ -191,24 +238,32 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 	}
 	defer func() { _ = remote.Close() }()
 
-	report, err := shim.Install(ctx, remote, inst.version, inst.source)
+	// The version check is its own step, taken before any operation rather than
+	// inside one. Here there is no operation after it — registering a Server is the
+	// whole command — but the shape is the one every later command follows, and
+	// --dry-run is what makes the step reportable without being taken.
+	//
+	// Nothing is recorded in state.json: that is an Environment's Observed state, and
+	// `server add` names no Environment. The installed version stays readable from the
+	// Server at any time, because the symlink target carries it. See
+	// docs/product-description.md, "The Shim".
+	step, err := inst.shimStep(ctx, remote, dryRun)
 	if err != nil {
 		return fmt.Errorf("installing the shim on %s: %w", name, err)
 	}
 
-	//nolint:gosec // G306: config.FileMode documents why 0644 is right here.
-	if err := os.WriteFile(path, updated, config.FileMode); err != nil {
-		return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
+	if !dryRun {
+		if err := os.WriteFile(path, updated, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", filepath.Base(path), err)
+		}
 	}
 
 	if err := env.Renderer.Result(&ServerAddResult{
 		Name:     name,
 		Host:     srv.Host,
 		User:     srv.User,
-		Platform: report.Platform.String(),
-		Shim:     report,
-	}); err != nil {
-		return fmt.Errorf("rendering the server add result: %w", err)
-	}
-	return nil
+		Platform: step.Platform.String(),
+		Shim:     step,
+		DryRun:   dryRun,
+	})
 }

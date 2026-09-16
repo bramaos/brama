@@ -11,6 +11,15 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Upgrade the shim on a server to the version of `brama` reaching it, as a step of
+  its own before anything else runs, never partway through. (#4)
+- Name both versions when the shim moves — `shim upgraded 0.1.0 → 0.1.1` — so the
+  step says what changed and not only that something did. (#4)
+- Replace a shim `brama` is not newer than instead of stopping, which is what a
+  server another developer reached with a newer `brama` leaves behind. (#4)
+- Add `--dry-run` to `brama server add`, which reports the shim it would install or
+  upgrade and writes nothing, on the server or in `brama.yaml`. It still connects:
+  which shim a server already runs cannot be answered from `brama.yaml`. (#4)
 - Add `brama server add <name> --host <host> [--user <user>]`, which registers a
   server and installs the shim on it. Authentication is OpenSSH's: `--host` is passed
   through untouched, so it may be a hostname, an IP, or a `~/.ssh/config` alias, and
@@ -34,6 +43,9 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Changed
 
+- Add `shim_change`, `shim_previous_version` and `dry_run` to `brama server add
+  --json`. `shim_version` is now the version the server runs when the command
+  finishes, which under `--dry-run` is the one it was already running. (#4)
 - `brama` now exits `1` rather than `2` for an unknown command or a bad flag.
 - Error messages now name the step that failed: `reading brama.yaml: permission
   denied` rather than `permission denied`.

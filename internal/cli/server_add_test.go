@@ -140,7 +140,7 @@ func TestServerAddRegistersTheServerAndInstallsTheShim(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "hetzner-prod"}, inst)
+	err := runServerAdd(env, root, "prod", config.Server{Host: "hetzner-prod"}, inst, false)
 	if err != nil {
 		t.Fatalf("runServerAdd() = %v, want success", err)
 	}
@@ -169,7 +169,7 @@ func TestServerAddSkipsTheUploadWhenTheShimIsCurrent(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst); err != nil {
+	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
 		t.Fatalf("runServerAdd() = %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestServerAddWritesNothingWhenTheProbeFails(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst)
+	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if err == nil {
 		t.Fatal("runServerAdd() = nil, want the failure to propagate")
 	}
@@ -207,7 +207,7 @@ func TestServerAddWithoutAConfigPointsAtInit(t *testing.T) {
 	inst, dialled := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst)
+	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if err == nil {
 		t.Fatal("runServerAdd() = nil, want an error when there is no brama.yaml")
 	}
@@ -227,13 +227,13 @@ func TestServerAddRejectsADuplicateWithoutConnecting(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst); err != nil {
+	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
 		t.Fatalf("first runServerAdd() = %v", err)
 	}
 
 	second := linuxServer()
 	inst2, dialled := installerFor(second)
-	err := runServerAdd(env, root, "prod", config.Server{Host: "other"}, inst2)
+	err := runServerAdd(env, root, "prod", config.Server{Host: "other"}, inst2, false)
 	if err == nil {
 		t.Fatal("second runServerAdd() = nil, want it to reject a name already registered")
 	}
@@ -254,7 +254,7 @@ func TestServerAddFailsBeforeConnectingWhenNoShimIsEmbedded(t *testing.T) {
 	inst.embedded = func() bool { return false }
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst)
+	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if !errors.Is(err, shim.ErrNotBuilt) {
 		t.Fatalf("err = %v, want ErrNotBuilt", err)
 	}
@@ -271,7 +271,7 @@ func TestServerAddReportsAPlatformWithNoBuild(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst)
+	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if err == nil {
 		t.Fatal("runServerAdd() = nil, want an error for an unsupported platform")
 	}
@@ -289,7 +289,12 @@ func TestServerAddResultJSONContract(t *testing.T) {
 		Name:     "prod",
 		Host:     "hetzner-prod",
 		Platform: "linux/amd64",
-		Shim:     shim.InstallResult{Version: testVersion, Uploaded: false},
+		Shim: shim.Step{
+			Platform: shim.Platform{OS: "linux", Arch: "amd64"},
+			From:     "0.0.9",
+			To:       testVersion,
+			Change:   shim.ChangeUpgrade,
+		},
 	}
 	if err := env.Renderer.Result(result); err != nil {
 		t.Fatal(err)
@@ -301,14 +306,17 @@ func TestServerAddResultJSONContract(t *testing.T) {
 	}
 
 	for key, want := range map[string]any{
-		"action":        "server_add",
-		"status":        "success",
-		"server":        "prod",
-		"host":          "hetzner-prod",
-		"user":          nil,
-		"platform":      "linux/amd64",
-		"shim_version":  testVersion,
-		"shim_uploaded": false,
+		"action":                "server_add",
+		"status":                "success",
+		"server":                "prod",
+		"host":                  "hetzner-prod",
+		"user":                  nil,
+		"platform":              "linux/amd64",
+		"shim_version":          testVersion,
+		"shim_previous_version": "0.0.9",
+		"shim_change":           "upgrade",
+		"shim_uploaded":         true,
+		"dry_run":               false,
 	} {
 		value, ok := got[key]
 		if !ok {
@@ -317,6 +325,77 @@ func TestServerAddResultJSONContract(t *testing.T) {
 		}
 		if value != want {
 			t.Errorf("%s = %v, want %v", key, value, want)
+		}
+	}
+}
+
+// --dry-run reports the pending upgrade instead of performing it. Nothing crosses
+// the connection, and brama.yaml is left alone — a server that was not really
+// registered must not be recorded as one.
+func TestServerAddDryRunReportsAPendingUpgradeAndWritesNothing(t *testing.T) {
+	root := projectWithConfig(t)
+	before := readConfig(t, root)
+
+	remote := linuxServer()
+	remote.installed = "0.0.9"
+	inst, _ := installerFor(remote)
+	env, out, _ := testEnv()
+
+	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, true); err != nil {
+		t.Fatalf("runServerAdd() = %v, want success", err)
+	}
+
+	if remote.uploads != 0 {
+		t.Errorf("uploads = %d, want none for a dry run", remote.uploads)
+	}
+	if remote.installed != "0.0.9" {
+		t.Errorf("the server now runs %q, want it left at 0.0.9", remote.installed)
+	}
+	if got := readConfig(t, root); !bytes.Equal(before, got) {
+		t.Errorf("brama.yaml was modified by a dry run:\n%s", got)
+	}
+	for _, want := range []string{"dry run", "0.0.9", testVersion} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output does not mention %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A dry run still connects: which shim a server runs is exactly what it is being
+// asked, and it cannot be answered from the file.
+func TestServerAddDryRunStillReachesTheServer(t *testing.T) {
+	root := projectWithConfig(t)
+	remote := linuxServer()
+	inst, dialled := installerFor(remote)
+	env, _, _ := testEnv()
+
+	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, true); err != nil {
+		t.Fatalf("runServerAdd() = %v", err)
+	}
+	if !*dialled {
+		t.Error("a dry run did not connect, so it could not know what the server runs")
+	}
+	if !remote.ran(shim.Path + " --version") {
+		t.Error("a dry run did not ask the server which shim it runs")
+	}
+}
+
+// The upgrade is a visible step: the version it came from and the version it went to
+// both reach the user, not just the fact that something happened.
+func TestServerAddPrintsWhatTheUpgradeChanged(t *testing.T) {
+	root := projectWithConfig(t)
+	remote := linuxServer()
+	remote.installed = "0.0.9"
+	inst, _ := installerFor(remote)
+	env, out, _ := testEnv()
+
+	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
+		t.Fatalf("runServerAdd() = %v", err)
+	}
+
+	for _, want := range []string{"0.0.9", testVersion, "upgrade"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output does not mention %q:\n%s", want, out.String())
 		}
 	}
 }

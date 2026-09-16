@@ -42,59 +42,6 @@ type Remote interface {
 // stays separable from where the bytes came from. Production passes Binary.
 type Source func(Platform) ([]byte, error)
 
-// InstallResult is what an install did.
-type InstallResult struct {
-	// Platform is what the Server answered to `uname -sm`.
-	Platform Platform
-	// Version is the Shim that answered on the Server once the install finished.
-	Version string
-	// Uploaded distinguishes an install from a no-op. A caller registering a fleet
-	// needs to tell "I put this here" from "it was already here" — two projects
-	// sharing one Server is the ordinary case, not the exotic one.
-	Uploaded bool
-}
-
-// Install puts the Shim on a Server and proves it runs there.
-//
-// A matching version already installed is left alone: the transfer is skipped, but
-// the verification is not, because running it is what proves the install rather than
-// what the filesystem claims about it.
-func Install(ctx context.Context, r Remote, version string, src Source) (InstallResult, error) {
-	platform, err := detectPlatform(ctx, r)
-	if err != nil {
-		return InstallResult{}, err
-	}
-
-	if installed, err := installedVersion(ctx, r); err == nil && installed == version {
-		return InstallResult{Platform: platform, Version: installed, Uploaded: false}, nil
-	}
-
-	data, err := src(platform)
-	if err != nil {
-		// Named here rather than by the caller: "unsupported platform" without the
-		// platform leaves the user nothing to report.
-		return InstallResult{Platform: platform}, fmt.Errorf("%w (server is %s)", err, platform)
-	}
-
-	staged := stagedPath(version)
-	if err := r.Send(ctx, "mkdir -p "+Home+" && cat > "+staged, data); err != nil {
-		return InstallResult{Platform: platform}, fmt.Errorf("uploading the shim: %w", err)
-	}
-	if _, err := r.Run(ctx, installScript(version)); err != nil {
-		return InstallResult{Platform: platform}, fmt.Errorf("installing the shim: %w", err)
-	}
-
-	installed, err := installedVersion(ctx, r)
-	if err != nil {
-		return InstallResult{Platform: platform}, fmt.Errorf("the shim was installed but does not run: %w", err)
-	}
-	if installed != version {
-		return InstallResult{Platform: platform}, fmt.Errorf(
-			"installed shim reports version %q, but %q was sent", installed, version)
-	}
-	return InstallResult{Platform: platform, Version: installed, Uploaded: true}, nil
-}
-
 func detectPlatform(ctx context.Context, r Remote) (Platform, error) {
 	out, err := r.Run(ctx, "uname -sm")
 	if err != nil {
