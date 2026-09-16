@@ -13,7 +13,7 @@ write by hand, in whatever order they like — or to drop the install from regis
 leave the first Pull to discover the Server has no Shim.
 
 The binary is also the one thing on the Server that is not per-Environment. It is the same
-build for every Environment on the box, it carries no state, and it is replaced wholesale on
+build for every Environment on the Server, it carries no state, and it is replaced wholesale on
 upgrade. Storing one copy per Environment means one copy per Environment to upgrade, and a
 Server hosting staging and production would hold two identical binaries that must not drift.
 
@@ -24,7 +24,7 @@ Server hosting staging and production would hold two identical binaries that mus
   `shim --version`, because executing it is what proves the install.
 - Observed state stays per-Environment. `state.json` remains under the Environment's
   `.brama/`, which is what it describes; only the executable moved.
-- The Shim's home is the SSH user's home, so two Identities on one machine get their own. That
+- The Shim's home is the SSH user's home, so two Identities on one Server get their own. That
   follows from Policy living on the Server rather than in `brama.yaml`, and it means an
   upgrade by one user cannot change what another user's operations execute.
 - Installing is no longer coupled to the Environment layout, which is what lets `server add`
