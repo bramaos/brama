@@ -1,0 +1,64 @@
+version: "2"
+
+run:
+  tests: false
+
+linters:
+  enable:
+    - bodyclose
+    - exhaustive
+    - goconst
+    - godot
+    - gomoddirectives
+    - goprintffuncname
+    - gosec
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - noctx
+    - nolintlint
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - tparallel
+    - unconvert
+    - unparam
+    - whitespace
+    - wrapcheck
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    misspell:
+      # `enviroments` is spelled wrong on purpose in config.Parse's doc comment: it
+      # is the example of the typo strict decoding exists to catch. Correcting it
+      # would delete the point of the sentence.
+      ignore-rules:
+        - enviroments
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+    rules:
+      - text: '(slog|log)\.\w+'
+        linters:
+          - noctx
+      # The Result implementations in internal/cli are one-line methods satisfying
+      # renderer.Result, which documents each of them on the interface. Repeating
+      # that on all four methods of all three Results is noise, not documentation.
+      - path: internal/cli/
+        text: 'exported method .* should have comment'
+        linters:
+          - revive
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax

@@ -1,0 +1,50 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Matches ci.yml, with its own group so the two workflows do not cancel each other.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # Single source of truth for the Go version: go.mod.
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          # Pinned, not floating: golangci-lint adds linters and tightens existing
+          # ones between minors, so `latest` starts failing on a commit that changed
+          # nothing. Bump deliberately, and run the new version locally first.
+          version: v2.13.2
+          args: --timeout=10m ./...
+
+  # Separate from the linters: this one fails on a CVE in a dependency, which is news
+  # about the outside world rather than about the commit under test.
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
