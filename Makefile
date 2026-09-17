@@ -207,7 +207,7 @@ TESTENV_COMPOSE := docker compose -f $(TESTENV_DIR)/compose.yml
 TESTENV_SERVERS := production staging
 # The images the Dockerfile builds FROM. Named here because they are pulled before
 # the build rather than during it — see testenv-pull.
-TESTENV_IMAGES  := ubuntu:24.04 composer:2.8
+TESTENV_IMAGES  := ubuntu:24.04 composer:2.8 postgres:18-alpine
 
 # The published ports, defined once and exported, because two consumers have to agree
 # on them: compose publishes them, and ssh-setup.sh writes them into the config
@@ -217,6 +217,9 @@ export PRODUCTION_SSH_PORT  ?= 2201
 export PRODUCTION_HTTP_PORT ?= 8081
 export STAGING_SSH_PORT     ?= 2202
 export STAGING_HTTP_PORT    ?= 8082
+# Not 5432: a developer with a PostgreSQL of their own should not have to stop it to
+# run this, and should not risk the fixture landing in it either.
+export POSTGRES_PORT        ?= 5433
 
 ## testenv-ssh-setup: generate the rig's keypair and ssh config fragment
 #
