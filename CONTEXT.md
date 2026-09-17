@@ -55,6 +55,18 @@ _Avoid_: dummy, stub, mock, fixture
 
 ### Anonymization
 
+**Schema**:
+The structure of an Environment's database — its tables, their columns, the types and
+constraints on those columns, and the foreign keys between them. Never any rows: a Schema is
+what Classification is decided against, and deciding must not require reading production data.
+_Avoid_: structure, catalog, metadata, DDL
+
+**Introspection**:
+Reading a Schema out of a live database, by asking the database itself. Never by parsing a
+dump, and never through the framework — WP-CLI cannot answer for a site that is broken, and a
+database with no Adapter has no framework to ask.
+_Avoid_: discovery, reflection, scanning, sniffing
+
 **Anonymization**:
 Irreversibly replacing real values with fabricated ones, before the data leaves the Server.
 _Avoid_: masking, obfuscation, sanitization, scrubbing, and especially pseudonymization —
