@@ -78,6 +78,11 @@ On a Server: the site is at `/srv/www/bedrock` owned by `deploy`, the database i
 `wordpress` reachable over the local unix socket, and the Shim installs to
 `/home/deploy/.brama/`.
 
+MariaDB also listens on the container's own loopback interface, and no database port
+is published to the host — the same as a rented Server. `schema_test.go` reaches it
+with an `ssh -L` tunnel of its own, which is the test's plumbing and not brama's: on a
+Server the introspector runs inside the Shim, with the database already local.
+
 ## Reset
 
 `make testenv-seed` is also the reset. It drops the database before it does anything
