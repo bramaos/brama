@@ -1,0 +1,99 @@
+name: labeler
+
+# Labels a pull request with what it touches and how big it is, so the list of open
+# pull requests carries that without being opened one at a time. Dependabot opens
+# most of them here, and five near-identical `ci: bump ...` titles are not a list
+# anyone reads — `dependencies github-actions size: XS` is.
+#
+# `pull_request_target` rather than `pull_request`, and this is the whole reason the
+# labels were not appearing: GitHub treats a Dependabot pull request as coming from
+# a fork, so a `pull_request` run gets a read-only GITHUB_TOKEN and cannot write a
+# label to the pull request that triggered it. `pull_request_target` runs against the
+# base branch and gets a writable token.
+#
+# That trigger is only safe because nothing here checks out or executes the pull
+# request's code. There is no actions/checkout step, deliberately: labeler reads the
+# configuration from the base branch through the API, and the size job asks the API
+# for a diffstat. Adding a checkout of the head ref would hand a writable token to
+# whatever the pull request contains, so do not add one.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  paths:
+    name: paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          # On, so a label stops being true when the pull request stops touching
+          # that path. A force-push that drops the only doc change should drop
+          # `documentation` with it, otherwise the labels describe the first push
+          # rather than the branch. Only labels named in .github/labeler.yml are
+          # removed; triage labels applied by hand are left alone.
+          sync-labels: true
+
+  size:
+    name: size
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Written out rather than taken from a third-party action because the count
+      # needs one local judgement — go.sum does not count — and because an action
+      # with a write token on `pull_request_target` is a dependency worth not having.
+      - name: apply size label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # go.sum is excluded because it is generated: one line in go.mod can move
+          # a few hundred lines here, and a size label that mostly reports lockfile
+          # churn says nothing about how long the pull request takes to read.
+          changed=$(
+            gh api --paginate "repos/$REPO/pulls/$PR/files" \
+              --jq '.[] | select(.filename != "go.sum") | .additions + .deletions' \
+              | awk '{ total += $1 } END { print total + 0 }'
+          )
+
+          # Thresholds are about reading time, not line count for its own sake: XS
+          # and S are a glance, M is a sitting, L and XL are the sizes worth asking
+          # whether the pull request should have been two.
+          if   [ "$changed" -lt 10 ];  then size='size: XS'
+          elif [ "$changed" -lt 50 ];  then size='size: S'
+          elif [ "$changed" -lt 250 ]; then size='size: M'
+          elif [ "$changed" -lt 800 ]; then size='size: L'
+          else                              size='size: XL'
+          fi
+
+          echo "$changed changed lines (go.sum excluded) -> $size"
+
+          # The size labels are mutually exclusive, so a re-run after a force-push
+          # has to clear the previous verdict before recording the new one. Removing
+          # a label that is not present is a 404, which is not a failure here.
+          for stale in 'size: XS' 'size: S' 'size: M' 'size: L' 'size: XL'; do
+            if [ "$stale" != "$size" ]; then
+              gh api --silent -X DELETE \
+                "repos/$REPO/issues/$PR/labels/$(jq -rn --arg l "$stale" '$l|@uri')" \
+                2>/dev/null || true
+            fi
+          done
+
+          gh api --silent -X POST "repos/$REPO/issues/$PR/labels" -f "labels[]=$size"
