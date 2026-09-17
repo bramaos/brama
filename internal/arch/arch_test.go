@@ -28,6 +28,7 @@ func TestCoreDoesNotImportARenderer(t *testing.T) {
 		"internal/scaffold",
 		"internal/refusal",
 		"internal/schema",
+		"internal/schema/catalog",
 		"internal/schema/mysql",
 		"internal/shim",
 		"internal/ssh",
