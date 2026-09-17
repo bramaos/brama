@@ -89,6 +89,47 @@ services:
       - "127.0.0.1:${STAGING_SSH_PORT:-2202}:22"
       - "127.0.0.1:${STAGING_HTTP_PORT:-8082}:80"
 
+  # Not a Server. This is a bare PostgreSQL for the postgres introspector to be
+  # measured against, and nothing else in the rig uses it: WordPress does not run on
+  # PostgreSQL, so there is no site to put in front of it and no Shim story to
+  # rehearse. It exists because the four pg_catalog queries are strings, and a string
+  # is valid SQL right up until a server disagrees.
+  #
+  # It publishes its port, which the Servers deliberately do not. The reason they do
+  # not is that they hold a `deploy` user with passwordless sudo; this holds a
+  # throwaway database and no shell worth reaching, so an ssh tunnel would buy
+  # nothing and cost the test a moving part.
+  #
+  # Pinned to a major version so that what the test asserts about format_type and
+  # attgenerated is the same answer on every machine.
+  postgres:
+    image: postgres:18-alpine
+    container_name: brama-testenv-postgres
+    environment:
+      POSTGRES_DB: wordpress
+      POSTGRES_USER: wordpress
+      POSTGRES_PASSWORD: ${TESTENV_DB_PASSWORD:-brama-testenv}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    # --wait needs something to wait on, and a TCP connect is not it: postgres
+    # accepts connections briefly during initdb, before the database exists.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wordpress -d wordpress"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 10s
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - testenv
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
 networks:
   testenv:
     driver: bridge
