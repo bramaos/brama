@@ -30,6 +30,7 @@ func TestCoreDoesNotImportARenderer(t *testing.T) {
 		"internal/schema",
 		"internal/schema/catalog",
 		"internal/schema/mysql",
+		"internal/schema/postgres",
 		"internal/shim",
 		"internal/ssh",
 		"internal/state",
