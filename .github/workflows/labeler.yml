@@ -1,9 +1,17 @@
 name: labeler
 
-# Labels a pull request with what it touches and how big it is, so the list of open
-# pull requests carries that without being opened one at a time. Dependabot opens
-# most of them here, and five near-identical `ci: bump ...` titles are not a list
-# anyone reads — `dependencies github-actions size: XS` is.
+# Labels a Dependabot pull request with what it touches and how big it is. Five
+# near-identical `ci: bump ...` titles are not a list anyone reads —
+# `dependencies github-actions size: XS` is.
+#
+# Dependabot's, and nobody else's. A pull request someone wrote has a title they
+# chose and a description they wrote, and labels derived from its paths repeat what
+# those already say — louder, and with less judgement. The labels are worth having
+# on the one kind of pull request that arrives with no author to explain it.
+#
+# The gate is per job below rather than on the trigger, because `on:` cannot filter
+# by who opened the pull request. Both jobs carry the same condition; a third job
+# added here needs it too, or it will label everyone.
 #
 # `pull_request_target` rather than `pull_request`, and this is the whole reason the
 # labels were not appearing: GitHub treats a Dependabot pull request as coming from
@@ -30,6 +38,10 @@ concurrency:
 jobs:
   paths:
     name: paths
+    # The pull request's author, not github.actor: a synchronize or a reopen is
+    # attributed to whoever pushed or reopened it, which on a Dependabot branch
+    # someone rebased by hand is a person.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -47,6 +59,8 @@ jobs:
 
   size:
     name: size
+    # See the note on paths above.
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -1,7 +1,9 @@
-# What a pull request touches, stated as a label, so the list of open pull requests
-# can be read without opening each one. Paths rather than titles: a title is written
-# by hand and a path is what actually changed, and Dependabot's titles say `ci:` for
-# a workflow bump whether or not that is the part of the tree it moved.
+# What a Dependabot pull request touches, stated as a label, so the list of open
+# pull requests can be read without opening each one. Paths rather than titles:
+# Dependabot's titles say `ci:` for a workflow bump whether or not that is the part
+# of the tree it moved.
+#
+# Only Dependabot's — see the note at the top of .github/workflows/labeler.yml.
 #
 # Consumed by .github/workflows/labeler.yml. Every label named here must already
 # exist in the repository — the labeler creates none of them, it only applies what
@@ -23,10 +25,12 @@ github-actions:
           - .github/workflows/**
           - .github/actions/**
 
-# Anything that changes what a dependency resolves to, whoever opened it. Dependabot
-# sets this label itself from .github/dependabot.yml; this line is what catches the
-# hand-written bump, and what still labels a Dependabot pull request if the label
-# assignment there ever fails quietly.
+# Anything that changes what a dependency resolves to. Dependabot sets this label
+# itself from .github/dependabot.yml; this line is what still labels a Dependabot
+# pull request if the label assignment there ever fails quietly.
+#
+# It does not catch a hand-written bump: the workflow runs on Dependabot's pull
+# requests and no others. A bump someone opened by hand is one they can describe.
 dependencies:
   - changed-files:
       - any-glob-to-any-file:
