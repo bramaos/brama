@@ -1,0 +1,21 @@
+#!/bin/bash
+# Install the developer's generated public key as deploy's authorized_keys.
+#
+# The key is mounted in read-only from the host rather than baked into the image, so
+# the image holds no credential and a regenerated keypair needs no rebuild. It is
+# copied rather than mounted straight onto ~/.ssh/authorized_keys because sshd's
+# StrictModes judges the file by its owner and mode, and a bind mount carries the
+# host's — which is whatever uid happened to run `make testenv-ssh-setup`.
+
+set -euo pipefail
+
+readonly SOURCE=/opt/brama-testenv/authorized_keys
+readonly TARGET=/home/deploy/.ssh/authorized_keys
+
+if [[ ! -s "${SOURCE}" ]]; then
+	echo "no public key at ${SOURCE} — run 'make testenv-ssh-setup' and bring the rig up again" >&2
+	exit 1
+fi
+
+install -d -o deploy -g deploy -m 0700 /home/deploy/.ssh
+install -o deploy -g deploy -m 0600 "${SOURCE}" "${TARGET}"
