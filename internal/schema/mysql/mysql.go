@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/bramaos/brama/internal/schema"
+	"github.com/bramaos/brama/internal/schema/catalog"
 )
 
 // Introspector reads one database through an open connection.
@@ -191,29 +192,10 @@ func scanForeignKey(rows *sql.Rows) (foreignKeyRow, error) {
 // query runs one statement and scans every row with scan. subject names what is being
 // asked for, for the error.
 //
-// Generic because the four result sets differ only in what a row is, and four copies
-// of the same acquire-iterate-check-close dance is four places for one of them to
-// quietly stop checking rows.Err.
+// The loop itself is catalog.Query, shared with every other introspector: the four
+// result sets differ only in what a row is, and a copy of the same
+// acquire-iterate-check-close dance per query per server is a place for one of them
+// to quietly stop checking rows.Err. All this adds is which catalogue answered.
 func query[T any](ctx context.Context, db *sql.DB, subject, statement string, scan func(*sql.Rows) (T, error), args ...any) ([]T, error) {
-	rows, err := db.QueryContext(ctx, statement, args...)
-	if err != nil {
-		return nil, fmt.Errorf("asking information_schema for %s: %w", subject, err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []T
-	for rows.Next() {
-		row, err := scan(rows)
-		if err != nil {
-			return nil, fmt.Errorf("asking information_schema for %s: %w", subject, err)
-		}
-		out = append(out, row)
-	}
-	// Reported, never swallowed: a connection dropped halfway through the column
-	// list otherwise reads as a table that simply has fewer columns, and a column
-	// that was never seen is a column nobody was asked to classify.
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("asking information_schema for %s: %w", subject, err)
-	}
-	return out, nil
+	return catalog.Query(ctx, db, "information_schema for "+subject, statement, scan, args...)
 }

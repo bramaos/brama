@@ -67,6 +67,13 @@ dump, and never through the framework — WP-CLI cannot answer for a site that i
 database with no Adapter has no framework to ask.
 _Avoid_: discovery, reflection, scanning, sniffing
 
+**Catalogue**:
+The database's own account of itself, which Introspection reads — `information_schema` on
+MySQL, `pg_catalog` on PostgreSQL. A Catalogue belongs to a database and is spelled that
+database's way; a Schema is Brama's, and is the same whichever Catalogue answered. The one
+place the word "catalog" is not a synonym for Schema.
+_Avoid_: metadata, system tables, data dictionary
+
 **Anonymization**:
 Irreversibly replacing real values with fabricated ones, before the data leaves the Server.
 _Avoid_: masking, obfuscation, sanitization, scrubbing, and especially pseudonymization —

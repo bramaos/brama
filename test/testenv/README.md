@@ -16,6 +16,11 @@ Why they exist, and why they are not in CI:
 Both listen on the loopback interface only, log in as `deploy` with passwordless
 sudo, and are the same image.
 
+Alongside them, and not a Server: `brama-testenv-postgres`, a stock PostgreSQL on
+5433. It has no site, no `sshd` and no seed. It exists so that the PostgreSQL
+Introspector is measured against a real server rather than a fake, which WordPress —
+MySQL only — gives no other way to do.
+
 ## Prerequisites
 
 - **Docker with cgroup v1.** Check with `docker info | grep -i 'cgroup version'`. The
@@ -66,7 +71,7 @@ make testenv-down                 # stop and remove both Servers
 | Path | |
 |---|---|
 | `Dockerfile` | the Server image: `base` (OS + LAMP) and `server` (users, units, site) |
-| `compose.yml` | the two Servers, their ports and their limits |
+| `compose.yml` | the two Servers and the PostgreSQL, their ports and their limits |
 | `rootfs/` | files copied into the image at their final paths |
 | `seed/seed.sh` | resets the database and installs WordPress + WooCommerce |
 | `seed/seed.php` | generates the rows, in one `wp eval-file` rather than one per row |
@@ -82,6 +87,12 @@ MariaDB also listens on the container's own loopback interface, and no database 
 is published to the host — the same as a rented Server. `schema_test.go` reaches it
 with an `ssh -L` tunnel of its own, which is the test's plumbing and not brama's: on a
 Server the introspector runs inside the Shim, with the database already local.
+
+`brama-testenv-postgres` does publish its port, on `127.0.0.1:5433`. It is not a
+Server and has nothing a tunnel would protect — no shell, no sudo, and a database
+`schema_postgres_test.go` creates and drops its own fixture in. Override the port with
+`POSTGRES_PORT` if 5433 is taken; the Makefile exports it to both compose and the
+tests, so setting it once moves both.
 
 ## Reset
 
