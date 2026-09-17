@@ -22,6 +22,13 @@
 //
 // PostgreSQL 12 or later. Earlier servers have no generated columns and no
 // pg_attribute.attgenerated to report them with, and both are long out of support.
+//
+// One known gap: a column whose type is a domain is reported as that domain, with no
+// length. The domain is what the column is declared as and naming it is not wrong,
+// but a domain over varchar(100) carries a limit this does not pass on, so a
+// fabricated value is checked against nothing. Chasing pg_type.typbasetype to the
+// underlying type would close it; nothing brama classifies yet needs it, and a
+// Length that is honestly absent is better than one inherited from the wrong type.
 package postgres
 
 import (
@@ -178,10 +185,24 @@ const (
 	// overstating it costs the Anonymization engine some distinct values, where
 	// understating it costs a failed write on a Server mid-Pull.
 	//
+	// An invalid index — one a CREATE UNIQUE INDEX CONCURRENTLY gave up on — is
+	// reported like any other. It enforces nothing, so reporting it overstates the
+	// obligation in the same harmless direction a partial index does, and the
+	// alternative is brama deciding a column is unconstrained on the strength of a
+	// flag that flips the moment someone reruns the statement.
+	//
 	// unnest ... WITH ORDINALITY is what turns indkey, a positional array, back
 	// into rows that remember their position. The join to pg_attribute is a LEFT
 	// join because an expression stores 0 there and no attribute answers to it; see
 	// expressionKeys.
+	//
+	// indnkeyatts is where indkey stops constraining anything. The columns after it
+	// are an INCLUDE list — payload carried in the index so a read need not visit
+	// the table, not part of what must be unique. Taking them for key columns turns
+	// UNIQUE (a) INCLUDE (b) into a key over (a, b), and a composite key is not a
+	// promise about either column on its own: Table.Unique would then answer false
+	// for a, and the Anonymization engine would fabricate duplicates into a column
+	// the database will reject them from.
 	keysQuery = `
 		SELECT c.relname, i.relname, x.indisprimary, a.attname
 		  FROM pg_catalog.pg_index x
@@ -193,6 +214,7 @@ const (
 		         ON a.attrelid = c.oid AND a.attnum = k.attnum AND NOT a.attisdropped
 		 WHERE n.nspname = $1
 		   AND x.indisunique
+		   AND k.ord <= x.indnkeyatts
 		 ORDER BY c.relname, i.relname, k.ord`
 
 	// Both ends are pinned to the same schema. PostgreSQL permits a foreign key

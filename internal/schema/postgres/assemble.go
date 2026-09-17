@@ -52,7 +52,7 @@ type (
 // dropped. pg_catalog answers about views, materialised views and the partitions of a
 // partitioned table as readily as base tables, and none of those has rows of its own
 // to anonymize and transfer.
-func assemble(database string, tables []string, columns []columnRow, keys []keyRow, foreignKeys []foreignKeyRow) schema.Schema {
+func assemble(schemaName string, tables []string, columns []columnRow, keys []keyRow, foreignKeys []foreignKeyRow) schema.Schema {
 	names := slices.Clone(tables)
 	slices.Sort(names)
 
@@ -109,6 +109,17 @@ func assemble(database string, tables []string, columns []columnRow, keys []keyR
 		if !ok {
 			continue
 		}
+		// The far end has to be a table that is here too. The query pins both ends
+		// to the same PostgreSQL schema, which is not quite the same question: a
+		// foreign key may point at a partition, and partitions are deliberately
+		// absent from tables. An edge to a name Schema.Tables does not contain is
+		// one Dependents would never walk back and Table() could never resolve, and
+		// a graph with dangling edges is worse than one that is honestly
+		// incomplete. Dropped whole, because every row of one constraint names the
+		// same referenced table and half an edge is not an improvement.
+		if _, ok := byName[row.referencedTable]; !ok {
+			continue
+		}
 		if i := slices.IndexFunc(table.ForeignKeys, func(fk schema.ForeignKey) bool { return fk.Name == row.name }); i >= 0 {
 			table.ForeignKeys[i].Columns = append(table.ForeignKeys[i].Columns, row.column)
 			table.ForeignKeys[i].References.Columns = append(table.ForeignKeys[i].References.Columns, row.referencedColumn)
@@ -144,7 +155,7 @@ func assemble(database string, tables []string, columns []columnRow, keys []keyR
 		})
 	}
 
-	return schema.Schema{Database: database, Tables: built}
+	return schema.Schema{Database: schemaName, Tables: built}
 }
 
 // key identifies one unique key: its name is only unique within its table.

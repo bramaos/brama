@@ -189,15 +189,41 @@ func TestAssembleKeepsCompositeForeignKeyColumnOrder(t *testing.T) {
 		{table: "order_items", name: "fk_item_address", column: "kind", referencedTable: "order_addresses", referencedColumn: "kind"},
 	}
 
-	got := assemble("public", []string{"order_items"}, nil, nil, fks)
+	got := assemble("public", []string{"order_items", "order_addresses"}, nil, nil, fks)
 
+	items, ok := got.Table("order_items")
+	if !ok {
+		t.Fatalf("Table(order_items) = _, false, want the table")
+	}
 	want := []schema.ForeignKey{{
 		Name:       "fk_item_address",
 		Columns:    []string{"order_id", "kind"},
 		References: schema.Reference{Table: "order_addresses", Columns: []string{"order_id", "kind"}},
 	}}
+	if !reflect.DeepEqual(items.ForeignKeys, want) {
+		t.Errorf("ForeignKeys = %+v, want %+v", items.ForeignKeys, want)
+	}
+}
+
+// A foreign key may point at a partition, and partitions are deliberately absent from
+// the tables list. The edge goes with them: Table() could never resolve the far end
+// and Dependents() would never walk back to it, so recording it would leave the graph
+// claiming a table the Schema does not contain.
+func TestAssembleDropsForeignKeysPointingOutsideTheSchema(t *testing.T) {
+	fks := []foreignKeyRow{
+		{table: "order_items", name: "fk_item_order", column: "order_id", referencedTable: "orders", referencedColumn: "id"},
+		{table: "order_items", name: "fk_item_partition", column: "event_id", referencedTable: "events_kept", referencedColumn: "id"},
+	}
+
+	got := assemble("public", []string{"order_items", "orders"}, nil, nil, fks)
+
+	want := []schema.ForeignKey{{
+		Name:       "fk_item_order",
+		Columns:    []string{"order_id"},
+		References: schema.Reference{Table: "orders", Columns: []string{"id"}},
+	}}
 	if !reflect.DeepEqual(got.Tables[0].ForeignKeys, want) {
-		t.Errorf("ForeignKeys = %+v, want %+v", got.Tables[0].ForeignKeys, want)
+		t.Errorf("ForeignKeys = %+v, want only the edge whose far end is here", got.Tables[0].ForeignKeys)
 	}
 }
 
