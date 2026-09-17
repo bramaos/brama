@@ -1,0 +1,12 @@
+[Unit]
+Description=Install the brama testenv public key for deploy
+# Before sshd, or the first login of a fresh container races the key into place.
+Before=ssh.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/brama-testenv-authkeys
+
+[Install]
+WantedBy=multi-user.target

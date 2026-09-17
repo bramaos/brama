@@ -1,0 +1,11 @@
+# The build context is test/testenv, not the repo. Only the Dockerfile's own inputs
+# — rootfs/ and seed/ — belong in it.
+
+*
+!rootfs/
+!seed/
+
+# Belt and braces: the generated keypair lives beside the Dockerfile and must never
+# reach a layer. It is excluded by the `*` above; naming it keeps that true if the
+# rule above is ever loosened.
+ssh/

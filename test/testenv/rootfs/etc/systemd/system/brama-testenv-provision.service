@@ -1,0 +1,15 @@
+[Unit]
+Description=Provision the brama testenv site database and .env
+# The database has to answer before the grants can be made, and Apache should not
+# start serving a site whose .env has not been written yet.
+After=mariadb.service
+Requires=mariadb.service
+Before=apache2.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/brama-testenv-provision
+
+[Install]
+WantedBy=multi-user.target
