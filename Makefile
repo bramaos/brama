@@ -195,6 +195,91 @@ release-notes:
 		END { if (!found) { print "no CHANGELOG.md section for " v > "/dev/stderr"; exit 1 } } \
 	' CHANGELOG.md
 
+# --- Containerised Servers ------------------------------------------------------
+#
+# A rig of two real Servers — Ubuntu, systemd, sshd, MariaDB — that brama reaches
+# through the `ssh` binary exactly as it reaches a rented Server. None of it is
+# wired into `check`, `test` or CI: those stay fast and need no container, and the
+# tests below need one. See test/testenv/README.md.
+
+TESTENV_DIR     := test/testenv
+TESTENV_COMPOSE := docker compose -f $(TESTENV_DIR)/compose.yml
+TESTENV_SERVERS := production staging
+# The images the Dockerfile builds FROM. Named here because they are pulled before
+# the build rather than during it — see testenv-pull.
+TESTENV_IMAGES  := ubuntu:24.04 composer:2.8
+
+# The published ports, defined once and exported, because two consumers have to agree
+# on them: compose publishes them, and ssh-setup.sh writes them into the config
+# fragment. Left to default independently, a change to one would produce a fragment
+# pointing at a port nothing listens on.
+export PRODUCTION_SSH_PORT  ?= 2201
+export PRODUCTION_HTTP_PORT ?= 8081
+export STAGING_SSH_PORT     ?= 2202
+export STAGING_HTTP_PORT    ?= 8082
+
+## testenv-ssh-setup: generate the rig's keypair and ssh config fragment
+#
+# Prints the Include line to paste. Writes nothing to ~/.ssh/config.
+.PHONY: testenv-ssh-setup
+testenv-ssh-setup:
+	@$(TESTENV_DIR)/bin/ssh-setup.sh
+
+## testenv-up: build the image and start both Servers
+#
+# Depends on the keypair: the public key is mounted into both containers, and Docker
+# would otherwise silently create a directory where the file should be.
+.PHONY: testenv-up
+testenv-up: testenv-ssh-setup testenv-pull
+	$(TESTENV_COMPOSE) up -d --build --wait
+	@echo
+	@$(TESTENV_COMPOSE) ps
+
+## testenv-pull: fetch the base images the rig builds from
+#
+# Separate from the build, and before it, because buildx resolves `FROM` through the
+# client's credential helper while `docker pull` goes through the daemon. On a Docker
+# Desktop WSL setup the former is docker-credential-desktop.exe, which WSL cannot
+# execute, so a build that has to reach the registry fails on an image that is
+# public. Pulling first leaves nothing for the build to resolve.
+.PHONY: testenv-pull
+testenv-pull:
+	@for image in $(TESTENV_IMAGES); do \
+		echo "  $$image"; docker pull -q $$image >/dev/null || exit 1; \
+	done
+
+## testenv-down: stop both Servers and remove them
+.PHONY: testenv-down
+testenv-down:
+	$(TESTENV_COMPOSE) down --remove-orphans
+	@rm -f $(TESTENV_DIR)/ssh/known_hosts
+
+## testenv-seed: load the deterministic WordPress data into both Servers
+#
+# Also the reset: it drops what is there first, so a Server broken by hand comes back
+# to a known state without a rebuild.
+.PHONY: testenv-seed
+testenv-seed:
+	@for server in $(TESTENV_SERVERS); do \
+		echo "==> seeding $$server"; \
+		$(TESTENV_COMPOSE) exec -T $$server \
+			/usr/local/share/brama-testenv/seed/seed.sh || exit 1; \
+	done
+
+## testenv-test: run the tests that need a running rig
+#
+# Build-tagged, so `make test` and `make check` never compile them. binary first:
+# these tests install the embedded Shim, and a brama built without one has nothing
+# to install.
+.PHONY: testenv-test
+testenv-test: shim
+	$(GO) test -tags testenv -count=1 -v ./$(TESTENV_DIR)/...
+
+## testenv-shell: open a root shell on a Server (make testenv-shell SERVER=staging)
+.PHONY: testenv-shell
+testenv-shell:
+	@$(TESTENV_COMPOSE) exec $(or $(SERVER),production) bash
+
 ## clean: remove build artifacts
 .PHONY: clean
 clean:

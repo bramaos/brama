@@ -11,6 +11,8 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Add `make testenv-up`, which starts two containerised servers running real `sshd`
+  for `brama server add` and the shim install to be tested against. (#41)
 - Publish `brama` for `linux` and `darwin`, on `amd64` and `arm64`, as an archive per
   release. Each release carries a checksum file, an SBOM per archive, and a build
   provenance attestation, so a download can be traced to the commit and the workflow
