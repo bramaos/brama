@@ -18,8 +18,14 @@ updates:
       # Conventional Commits, per docs/agents/commits.md. `ci` because these are
       # workflow files and a bump here changes nothing a user of brama can see.
       prefix: ci
+    # Dependabot applies these itself, when the pull request is opened. It creates
+    # nothing: a name that does not already exist in the repository is dropped
+    # without a warning, which is why the pull requests carried no labels at all
+    # until `dependencies` was created. The ecosystem label is set here as well as
+    # in .github/labeler.yml so it is there on the first render of the list.
     labels:
       - dependencies
+      - github-actions
 
   - package-ecosystem: gomod
     directory: /
@@ -35,6 +41,7 @@ updates:
       prefix-development: chore
     labels:
       - dependencies
+      - go
     groups:
       # charm.land/* and its transitive colour libraries move together. Separate pull
       # requests for each would be a week of noise for one upgrade.
