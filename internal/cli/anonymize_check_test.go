@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -572,10 +573,13 @@ func TestCheckReportsPresetDriftApartFromHeld(t *testing.T) {
 	}
 }
 
-// The machine contract counts the two separately for the same reason the prose separates
-// them. One number for "the preset and the file differ" would put a tightening brama has
+// The machine contract lists the two separately for the same reason the prose separates
+// them. One key for "the preset and the file differ" would put a tightening brama has
 // already carried out and a loosening it has refused to in the same bucket.
-func TestCheckCountsAppliedAndHeldDriftSeparately(t *testing.T) {
+//
+// It names the columns rather than counting them: a caller that can only count has to
+// send a person to the repo to find out which column it was.
+func TestCheckNamesAppliedAndHeldDriftSeparatelyInTheContract(t *testing.T) {
 	root := classifiedProject(t, `anonymize:
   preset: wordpress
   tables:
@@ -601,8 +605,61 @@ func TestCheckCountsAppliedAndHeldDriftSeparately(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
 	}
-	if payload["preset_drift_applied"] != float64(2) || payload["preset_drift_held"] != float64(1) {
-		t.Errorf("payload = %v, want two applied and one held", payload)
+	applied, held := payload["preset_drift_applied"], payload["preset_drift_held"]
+	want := []any{"wp_users.user_email: keep → fake.email", "wp_users.user_pass: keep → fake.password"}
+	if !reflect.DeepEqual(applied, want) {
+		t.Errorf("preset_drift_applied = %v, want the two tightened columns named", applied)
+	}
+	if !reflect.DeepEqual(held, []any{"wp_posts.post_content: drop → keep"}) {
+		t.Errorf("preset_drift_held = %v, want the held column named", held)
+	}
+}
+
+// No drift is an answer, not an absent one. A caller reading null would have to tell "the
+// preset agrees with the file" from "this run did not look", and those are not the same.
+func TestTheDriftKeysAreEmptyListsAndNeverNull(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	for _, key := range []string{"preset_drift_applied", "preset_drift_held"} {
+		list, ok := payload[key].([]any)
+		if !ok || len(list) != 0 {
+			t.Errorf("%s = %v, want an empty list", key, payload[key])
+		}
+	}
+}
+
+// The columns are the caller's to act on and the person's to read, and each audience gets
+// them once. A list of columns is a wrapped line in the human table and a paragraph in
+// the notes, so the contract carries the list and the terminal carries the prose.
+func TestTheDriftListsStayOutOfTheHumanOutput(t *testing.T) {
+	root := classifiedProject(t, `anonymize:
+  preset: wordpress
+  tables:
+    wp_users:
+      columns:
+        user_email:
+          action: keep
+`)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+	printed := out.String()
+	if strings.Contains(printed, "preset_drift_applied") {
+		t.Errorf("the contract key reached the terminal:\n%s", printed)
+	}
+	if strings.Count(printed, "wp_users.user_email: keep → fake.email") != 1 {
+		t.Errorf("the drifted column is not named exactly once:\n%s", printed)
 	}
 }
 

@@ -153,6 +153,16 @@ func (r *AnonymizeCheckResult) driftNotes() []string {
 	return notes
 }
 
+// driftNames is the Drift as the contract carries it — one string a column, never null.
+// No drift is an answer, and an empty list is how a caller reads one.
+func driftNames(drift preset.Drifts) []string {
+	out := make([]string, 0, len(drift))
+	for _, d := range drift {
+		out = append(out, d.String())
+	}
+	return out
+}
+
 func indent(drift preset.Drifts) []string {
 	out := make([]string, 0, len(drift))
 	for _, d := range drift {
@@ -203,11 +213,16 @@ func (r *AnonymizeCheckResult) Fields() []renderer.Field {
 		Add("columns", "Columns", r.Summary.Columns).
 		Add("correlation_groups", "Correlation groups", r.Summary.Groups).
 		AddOptional("schema", "Schema read from", r.SchemaFrom, "no environment was reachable").
-		// Both counts are always present and always separate. A caller acting on one
-		// number for "the preset and the file differ" would be acting on a tightening
-		// brama has already carried out and a loosening it has refused to.
-		Add("preset_drift_applied", "Preset stricter, applied", len(r.Drift.Applied())).
-		Add("preset_drift_held", "Preset looser, held", len(r.Drift.Held()))
+		// Both lists are always present and always separate. A caller acting on one key
+		// for "the preset and the file differ" would be acting on a tightening brama has
+		// already carried out and a loosening it has refused to.
+		//
+		// They name the columns rather than counting them, because a caller that can only
+		// count has to send a person to the repo to find out which column it was. They
+		// are contract-only: the same columns reach a person through the Notes, in prose
+		// that does not wrap off the screen at ten of them.
+		AddContractOnly("preset_drift_applied", driftNames(r.Drift.Applied())).
+		AddContractOnly("preset_drift_held", driftNames(r.Drift.Held()))
 
 	// The coverage keys are always present, so a caller reads the same shape from
 	// every run. Which one it is reading is what `schema` and the notes answer: where

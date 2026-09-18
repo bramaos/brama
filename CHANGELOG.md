@@ -17,9 +17,13 @@ See `docs/agents/changelog.md` for how entries are written.
 - Hold a preset's answer where it is the looser of the two. A preset that starts keeping
   a column your file fabricates never widens what leaves production on its own: your
   file's answer stands until `brama anonymize review` accepts the change. (#54, #7)
-- Report both in `brama anonymize check`, counted and listed apart — the columns brama is
-  already anonymizing more strictly than the file says, and the ones it is holding — so
-  neither reads as the other. A run that finds either is reported as `partial`. (#54, #7)
+- Report both in `brama anonymize check`, listed apart — the columns brama is already
+  anonymizing more strictly than the file says, and the ones it is holding — so neither
+  reads as the other. A run that finds either is reported as `partial`. (#54, #7)
+- Name the drifted columns in `--json` under `preset_drift_applied` and
+  `preset_drift_held`, so a CI job can report which column changed instead of only that
+  something did. Both keys are always present, and an empty list means the preset and
+  your file agree. (#54, #7)
 - Accept an approval of a column a preset has since tightened, rather than refusing the
   run over it. Approving a column your file keeps is not a mistake, and a tightening that
   stopped the pull it exists to make safe would be the wrong way round — `brama anonymize
