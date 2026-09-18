@@ -26,6 +26,7 @@ func TestCoreDoesNotImportARenderer(t *testing.T) {
 		"internal/adapter",
 		"internal/adapter/wordpress",
 		"internal/scaffold",
+		"internal/generator",
 		"internal/refusal",
 		"internal/schema",
 		"internal/schema/catalog",
