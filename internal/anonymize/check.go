@@ -56,9 +56,11 @@ type Summary struct {
 // by default, one when `--env` narrows it. Approval is the only part of the model that
 // differs between destinations, so it is the only part this takes a name for.
 //
-// cfg is expected to have been through config.Validate: this answers the questions that
-// package cannot, because they need the Generator vocabulary and a view of the whole
-// file at once, and it does not repeat the ones it can.
+// cfg is expected to have been through config.Validate and then Resolve: this answers
+// the questions config cannot, because they need the Generator vocabulary and a view of
+// the whole file at once, and it does not repeat the ones it can. Resolve is what makes
+// the columns a Preset classifies visible here — unresolved, they are columns this
+// would report as classified by nobody.
 func Check(cfg *config.Config, environments []string) (Summary, []Problem) {
 	var problems []Problem
 	add := func(at, detail string) {
@@ -154,10 +156,10 @@ func checkApprovals(cfg *config.Config, environments []string) []Problem {
 				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
 					"%s is classified per key under keys, so approving the column says nothing "+
 						"about which keys it covers", ref)})
-			case !classified && cfg.Anonymize.Preset == "":
-				// With a Preset named, the column may well be one the Preset
-				// classifies. Presets are referenced and not expanded here, so the
-				// honest answer is silence rather than a refusal brama cannot support.
+			case !classified:
+				// Reached only after Resolve, so a Preset has already answered for
+				// every column it knows. A column still missing here is one nothing
+				// classifies, and approving it decides nothing at all.
 				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
 					"%s is not a column this file classifies — approval names what to send as "+
 						"real data, and nothing here says what this column holds", ref)})

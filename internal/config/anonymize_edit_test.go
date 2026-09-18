@@ -64,7 +64,7 @@ servers:
 // The note `brama init` leaves says there is no classification. The moment there is
 // one, it is a sentence that contradicts the file it sits in.
 func TestAddAnonymizeReplacesTheNoteInitLeft(t *testing.T) {
-	out, err := config.AddAnonymize([]byte(skeleton), classification())
+	out, err := config.AddAnonymize([]byte(skeleton), "", classification())
 	if err != nil {
 		t.Fatalf("AddAnonymize: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestAddAnonymizeReplacesTheNoteInitLeft(t *testing.T) {
 // Everything outside the inserted lines comes through byte for byte, including the
 // column-aligned comments `brama init` wrote.
 func TestAddAnonymizePreservesCommentsAndKeyOrder(t *testing.T) {
-	out, err := config.AddAnonymize([]byte(skeleton), classification())
+	out, err := config.AddAnonymize([]byte(skeleton), "", classification())
 	if err != nil {
 		t.Fatalf("AddAnonymize: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestAddAnonymizePreservesCommentsAndKeyOrder(t *testing.T) {
 // The order is init's, which is the schema's. A file whose tables shuffled between
 // runs is churn no reviewer can read past.
 func TestAddAnonymizeWritesTablesInTheOrderItWasGiven(t *testing.T) {
-	out, err := config.AddAnonymize([]byte(skeleton), classification())
+	out, err := config.AddAnonymize([]byte(skeleton), "", classification())
 	if err != nil {
 		t.Fatalf("AddAnonymize: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestAddAnonymizeWritesTablesInTheOrderItWasGiven(t *testing.T) {
 // The declared type is written beside the action, so "why fake.email here?" is
 // answered in the diff rather than by reopening the database.
 func TestAddAnonymizeNamesTheTypeItDecidedAgainst(t *testing.T) {
-	out, err := config.AddAnonymize([]byte(skeleton), classification())
+	out, err := config.AddAnonymize([]byte(skeleton), "", classification())
 	if err != nil {
 		t.Fatalf("AddAnonymize: %v", err)
 	}
@@ -146,7 +146,7 @@ anonymize:
           action: keep
 `
 
-	_, err := config.AddAnonymize([]byte(doc), classification())
+	_, err := config.AddAnonymize([]byte(doc), "", classification())
 
 	if !errors.Is(err, config.ErrAnonymizeExists) {
 		t.Errorf("AddAnonymize() = %v, want ErrAnonymizeExists", err)
@@ -156,7 +156,7 @@ anonymize:
 // An `anonymize:` with nothing under it decodes to no block at all, and appending a
 // second one produces a document neither brama nor YAML can read.
 func TestAddAnonymizeRefusesAnEmptyBlockAlreadyInTheFile(t *testing.T) {
-	_, err := config.AddAnonymize([]byte(skeleton+"\nanonymize:\n"), classification())
+	_, err := config.AddAnonymize([]byte(skeleton+"\nanonymize:\n"), "", classification())
 
 	if !errors.Is(err, config.ErrAnonymizeExists) {
 		t.Errorf("AddAnonymize() = %v, want ErrAnonymizeExists", err)
@@ -167,13 +167,48 @@ func TestAddAnonymizeRefusesAnEmptyBlockAlreadyInTheFile(t *testing.T) {
 // columns" into a file that looks decided and is not — and `anonymize check` refuses
 // a block that classifies nothing by name.
 func TestAddAnonymizeRefusesToWriteAnEmptyBlock(t *testing.T) {
-	_, err := config.AddAnonymize([]byte(skeleton), nil)
+	_, err := config.AddAnonymize([]byte(skeleton), "", nil)
 
 	if err == nil {
 		t.Fatal("AddAnonymize() = nil, want a refusal to write a block that decides nothing")
 	}
 	if errors.Is(err, config.ErrAnonymizeExists) {
 		t.Errorf("AddAnonymize() = %v, want it reported as nothing to write", err)
+	}
+}
+
+// A Preset is written as a name and never as the classification behind it. That is what
+// keeps the file short enough to review, and what lets a preset brama tightens reach
+// this project without the file being edited again.
+func TestAddAnonymizeReferencesThePresetByName(t *testing.T) {
+	out, err := config.AddAnonymize([]byte(skeleton), "wordpress", classification())
+	if err != nil {
+		t.Fatalf("AddAnonymize: %v", err)
+	}
+
+	got := parseAnonymize(t, out)
+	if got.Preset != "wordpress" {
+		t.Errorf("preset = %q, want the preset referenced by name", got.Preset)
+	}
+	if _, expanded := got.Tables["wp_users"]; expanded {
+		t.Error("the preset was expanded into the file — it is referenced, not copied")
+	}
+}
+
+// A preset covering everything the schema has leaves no tables to write, and that is a
+// complete block rather than an empty one. `tables:` with nothing under it would read,
+// in the diff, as a list somebody forgot to fill.
+func TestAddAnonymizeWritesAPresetWithNoTablesOfItsOwn(t *testing.T) {
+	out, err := config.AddAnonymize([]byte(skeleton), "wordpress", nil)
+	if err != nil {
+		t.Fatalf("AddAnonymize: %v", err)
+	}
+
+	if strings.Contains(string(out), "tables:") {
+		t.Errorf("an empty tables key was written:\n%s", out)
+	}
+	if got := parseAnonymize(t, out); got.Preset != "wordpress" {
+		t.Errorf("preset = %q, want the preset alone to be a whole block", got.Preset)
 	}
 }
 
@@ -186,7 +221,7 @@ app:
   adapter: wordpress
 `
 
-	out, err := config.AddAnonymize([]byte(doc), classification())
+	out, err := config.AddAnonymize([]byte(doc), "", classification())
 	if err != nil {
 		t.Fatalf("AddAnonymize: %v", err)
 	}

@@ -449,3 +449,82 @@ func TestCheckResultReportsCoverageInTheContract(t *testing.T) {
 		t.Errorf("Status() = %q, want partial with a column unclassified", verified.Status())
 	}
 }
+
+// A preset is expanded in memory and never into the file, so a column it classifies is
+// covered without ever appearing in brama.yaml. This is the run every WordPress project
+// gets: a reference one line long, answering for a schema the file does not list.
+func TestCheckCoversTheColumnsAPresetClassifies(t *testing.T) {
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	env, out, _ := testEnv()
+	core := schema.Schema{Database: "acme", Tables: []schema.Table{{
+		Name: "wp_users",
+		Columns: []schema.Column{
+			{Name: "ID", Type: "bigint", Declared: "bigint(20) unsigned"},
+			{Name: "user_email", Type: "varchar", Declared: "varchar(100)", Length: 100},
+		},
+	}}}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", core)); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want the preset to answer for the schema", err)
+	}
+	if !strings.Contains(out.String(), "covering every column staging has") {
+		t.Errorf("output does not report the preset's columns as covered:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "wordpress") {
+		t.Errorf("output does not name the preset the counts came from:\n%s", out.String())
+	}
+}
+
+// A preset the file references and brama does not ship resolves to nothing, and nothing
+// is every column that preset was carrying. Refused by name, with the ones brama has.
+//
+// It is the only thing reported. Carrying on would call every column the preset was
+// holding unclassified and refuse every approval of one, which is a page of consequence
+// stacked on top of the one typo that caused it.
+func TestCheckRefusesAPresetBramaDoesNotShipAndSaysNothingElse(t *testing.T) {
+	root := projectFile(t, "anonymize:\n  preset: wordpres\n",
+		map[string]string{"local": "wp_options.option_value"})
+	env, _, _ := testEnv()
+	core := schema.Schema{Database: "acme", Tables: []schema.Table{{
+		Name:    "wp_users",
+		Columns: []schema.Column{{Name: "user_email", Type: "varchar", Declared: "varchar(100)", Length: 100}},
+	}}}
+
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", core)))
+
+	if !strings.Contains(r.Detail, "wordpres") || !strings.Contains(r.Detail, "wordpress") {
+		t.Errorf("Detail = %q, want the unknown preset named and the ones brama ships listed", r.Detail)
+	}
+	if strings.Contains(r.Detail, "problems") {
+		t.Errorf("Detail = %q, want the typo alone and not what followed from it", r.Detail)
+	}
+}
+
+// A preset is knowledge, not authorization. It classifies `wp_options.option_value` as
+// keep, and that grants no environment anything: the approval is a separate line a human
+// writes, and check accepts it only because they did.
+func TestCheckTreatsAPresetsKeepAsUnapprovedUntilAHumanApprovesIt(t *testing.T) {
+	env, _, _ := testEnv()
+	block := "anonymize:\n  preset: wordpress\n"
+
+	bare := classifiedProject(t, block)
+	if err := runAnonymizeCheck(t.Context(), env, bare, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want a preset that approves nothing to pass", err)
+	}
+	cfg, _, err := config.Load(bare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, environment := range cfg.Environments {
+		if environment.Approves("wp_options", "option_value") {
+			t.Errorf("%s approves a column only the preset kept — a preset grants no approval", name)
+		}
+	}
+
+	// And the approval a human does write is accepted, because the preset said what the
+	// column holds.
+	approved := projectFile(t, block, map[string]string{"local": "wp_options.option_value"})
+	if err := runAnonymizeCheck(t.Context(), env, approved, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want an approval of a preset-kept column accepted", err)
+	}
+}

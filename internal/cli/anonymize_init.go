@@ -11,6 +11,7 @@ import (
 
 	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
+	"github.com/bramaos/brama/internal/preset"
 	"github.com/bramaos/brama/internal/renderer"
 )
 
@@ -24,6 +25,13 @@ type AnonymizeInitResult struct {
 	Path string
 	// SchemaFrom names the Environment whose Schema was classified.
 	SchemaFrom string
+	// Preset names the Preset written into the file as a reference, and is empty when
+	// brama ships none for this project's Adapter. The columns it covers are not in
+	// Tables and are not Unclassified either — they are answered for elsewhere, which
+	// is the one thing a reader of these counts has to be told.
+	Preset string
+	// Covered is how many columns of the Schema the Preset answered for.
+	Covered int
 	// Tables is what was written, in the order it was written.
 	Tables []config.TableClassification
 	// Unclassified are the columns no Generator claimed, left out of the file.
@@ -45,6 +53,10 @@ func (r *AnonymizeInitResult) Status() renderer.Status {
 func (r *AnonymizeInitResult) Headline() string {
 	wrote := fmt.Sprintf("%s in %s",
 		plural(anonymize.Claimed(r.Tables), "column"), plural(len(r.Tables), "table"))
+	if r.Preset != "" {
+		wrote = fmt.Sprintf("%s beyond the %s preset's %s",
+			wrote, r.Preset, plural(r.Covered, "column"))
+	}
 
 	switch {
 	case r.DryRun:
@@ -80,6 +92,8 @@ func (r *AnonymizeInitResult) Fields() []renderer.Field {
 	return renderer.Fields{}.
 		Add("file", "File", r.Path).
 		Add("schema", "Schema read from", r.SchemaFrom).
+		AddOptional("preset", "Preset", r.Preset, "none").
+		Add("preset_columns", "Columns the preset covers", r.Covered).
 		Add("tables", "Tables", len(r.Tables)).
 		Add("columns", "Columns classified", anonymize.Claimed(r.Tables)).
 		Add("unclassified_columns", "Left unclassified", len(r.Unclassified)).
@@ -98,6 +112,10 @@ func newAnonymizeInitCmd(env *console) *cobra.Command {
 		Long: "Read an environment's schema and write an anonymize block classifying the columns\n" +
 			"brama recognises: a column a generator declares a claim on — by name and by type —\n" +
 			"becomes `action: fake.<generator>`.\n\n" +
+			"Where brama ships a preset for this project's adapter, the block references it by\n" +
+			"name instead of expanding it, and the tables it already knows are not written out\n" +
+			"again. The file stays short, and a preset brama tightens reaches this project\n" +
+			"without anyone editing it.\n\n" +
 			"Everything else is left out of the file, which leaves it unclassified and a pull\n" +
 			"refused. Nothing is defaulted to `drop`: dropping is safe about privacy and\n" +
 			"reckless about everything else, and zeroing a column brama could not name is a\n" +
@@ -153,10 +171,27 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 			"and %s could not read one from %s", filepath.Base(path), join(environments))
 	}
 
-	// Cover with nothing classified is the whole schema, column by column, which is
+	// The Preset brama ships for this project's Adapter, if it ships one. It is the
+	// Classification this project starts from, and it is referenced by name rather than
+	// copied into the file: what it covers is decided already, and what it does not is
+	// the only thing init has to write down. A Preset answer therefore beats a
+	// Generator's pattern claim on the same column without either of them being
+	// compared — the column never reaches the Generators at all. See ADR 0011.
+	//
+	// named is the one signal for whether there is a Preset: empty is "brama ships none
+	// for this adapter", and it is the same empty string the block is written from.
+	var (
+		named string
+		start *config.Anonymize
+	)
+	if shipped, covers := preset.For(cfg.App.Adapter); covers {
+		named, start = shipped.Name, shipped.Apply(nil)
+	}
+
+	// Cover against that start is the part of the schema still undecided, which is
 	// exactly the list `check` calls unclassified. init and check walk the same ground
 	// on purpose: what one reports, the other offers an answer for.
-	coverage, problems := anonymize.Cover(nil, read)
+	coverage, problems := anonymize.Cover(start, read)
 	if len(problems) > 0 {
 		// Unreachable today — nothing is classified, so no Generator was named and none
 		// can fail to fit. Reported rather than dropped, because silently writing a file
@@ -165,7 +200,7 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	}
 
 	tables := anonymize.Bootstrap(coverage)
-	if len(tables) == 0 {
+	if len(tables) == 0 && named == "" {
 		return fmt.Errorf("no generator claimed any of the %s in %s — "+
 			"classify them with `brama anonymize review`, which asks about them one at a time",
 			plural(coverage.Columns, "column"), from)
@@ -175,7 +210,7 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
-	updated, err := config.AddAnonymize(body, tables)
+	updated, err := config.AddAnonymize(body, named, tables)
 	if errors.Is(err, config.ErrAnonymizeExists) {
 		return fmt.Errorf("%s already classifies this project — amend it with `brama anonymize review`", filepath.Base(path))
 	}
@@ -195,8 +230,13 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	}
 
 	result := &AnonymizeInitResult{
-		Path:         path,
-		SchemaFrom:   from,
+		Path:       path,
+		SchemaFrom: from,
+		Preset:     named,
+		// What the Preset answered for is what the schema has and Cover did not report
+		// back — derived from the same comparison rather than counted separately, so
+		// the two halves of the report cannot disagree about which columns those are.
+		Covered:      coverage.Columns - len(coverage.Unclassified),
 		Tables:       tables,
 		Unclassified: leftUnclassified(coverage, tables),
 		DryRun:       dryRun,

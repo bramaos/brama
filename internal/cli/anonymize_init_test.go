@@ -22,6 +22,23 @@ func unclassifiedProject(t *testing.T) string {
 		"# pull will refuse. Classify them with: brama anonymize init\n")
 }
 
+// presetlessProject is the same project under an adapter brama ships no preset for, so
+// that what a generator claims is the whole of what init has to go on.
+func presetlessProject(t *testing.T) string {
+	t.Helper()
+	root := unclassifiedProject(t)
+	path := filepath.Join(root, config.Filename)
+	body, err := os.ReadFile(path) //nolint:gosec // G703: path is this test's own temp dir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	swapped := strings.Replace(string(body), "adapter: wordpress", "adapter: laravel", 1)
+	if err := os.WriteFile(path, []byte(swapped), config.FileMode); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 // wordpressish is a schema with columns generators claim, columns they do not, and one
 // column whose name a generator claims and whose type it cannot fill.
 func wordpressish() schema.Schema {
@@ -288,10 +305,11 @@ func TestAnonymizeInitDryRunWritesNothingAndShowsWhatItWould(t *testing.T) {
 	}
 }
 
-// A schema brama recognises nothing in is not a file to write. Saying so is more use
-// than an empty block, which `anonymize check` would refuse by name anyway.
+// A schema brama recognises nothing in, under an adapter it ships no preset for, is not
+// a file to write. Saying so is more use than an empty block, which `anonymize check`
+// would refuse by name anyway.
 func TestAnonymizeInitFailsWhenNoGeneratorClaimsAnything(t *testing.T) {
-	root := unclassifiedProject(t)
+	root := presetlessProject(t)
 	env, _, _ := testEnv()
 	opaque := schema.Schema{Tables: []schema.Table{{Name: "settings", Columns: []schema.Column{
 		{Name: "retry_count", Type: "int", Declared: "int(11)"},
@@ -307,6 +325,88 @@ func TestAnonymizeInitFailsWhenNoGeneratorClaimsAnything(t *testing.T) {
 	}
 	if written := written(t, root).Anonymize; written != nil {
 		t.Errorf("anonymize = %v, want no block that decides nothing", written)
+	}
+}
+
+// wordpressCore is the part of a real WordPress schema the shipped preset knows, plus
+// one table it does not — the case every WordPress project is actually in.
+func wordpressCore() schema.Schema {
+	users := schema.Table{Name: "wp_users", Columns: []schema.Column{
+		{Name: "ID", Type: "bigint", Declared: "bigint(20) unsigned"},
+		{Name: "user_login", Type: "varchar", Declared: "varchar(60)", Length: 60},
+		{Name: "user_email", Type: "varchar", Declared: "varchar(100)", Length: 100},
+		{Name: "display_name", Type: "varchar", Declared: "varchar(250)", Length: 250},
+	}}
+	posts := schema.Table{Name: "wp_posts", Columns: []schema.Column{
+		{Name: "ID", Type: "bigint", Declared: "bigint(20) unsigned"},
+		{Name: "post_password", Type: "varchar", Declared: "varchar(255)", Length: 255},
+	}}
+	plugin := schema.Table{Name: "acme_leads", Columns: []schema.Column{
+		{Name: "lead_email", Type: "varchar", Declared: "varchar(100)", Length: 100},
+		{Name: "internal_note", Type: "text", Declared: "text"},
+	}}
+	return schema.Schema{Database: "acme", Tables: []schema.Table{users, posts, plugin}}
+}
+
+// The whole of the feature at the command: the block references the preset by name, and
+// the tables it already knows are not written out again.
+func TestAnonymizeInitReferencesThePresetRatherThanExpandingIt(t *testing.T) {
+	root := unclassifiedProject(t)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressCore())); err != nil {
+		t.Fatalf("runAnonymizeInit() = %v", err)
+	}
+
+	a := written(t, root).Anonymize
+	if a.Preset != "wordpress" {
+		t.Errorf("preset = %q, want the preset referenced by name", a.Preset)
+	}
+	if _, expanded := a.Tables["wp_users"]; expanded {
+		t.Errorf("tables = %v, want the preset's tables left out of the file", a.Tables)
+	}
+	if !strings.Contains(out.String(), "wordpress") {
+		t.Errorf("output does not name the preset it referenced:\n%s", out.String())
+	}
+}
+
+// A column the preset already answers for is not init's to write. Writing it would
+// expand the preset one column at a time, and pin what the preset says at today's answer.
+func TestAnonymizeInitDoesNotWriteWhatThePresetCovers(t *testing.T) {
+	root := unclassifiedProject(t)
+	env, _, _ := testEnv()
+
+	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressCore())); err != nil {
+		t.Fatalf("runAnonymizeInit() = %v", err)
+	}
+
+	tables := written(t, root).Anonymize.Tables
+	if _, written := tables["wp_posts"]; written {
+		t.Errorf("wp_posts was written — a generator claims post_password, and the preset answers for it")
+	}
+	if got := tables["acme_leads"].Columns["lead_email"].Action; got != "fake.email" {
+		t.Errorf("acme_leads.lead_email = %q, want the plugin table still classified", got)
+	}
+}
+
+// A preset covering the whole schema leaves no tables to write, and a reference to it is
+// still a decision worth recording. The old "nothing was claimed" refusal is about a
+// project with nothing to go on, and this project has a preset.
+func TestAnonymizeInitWritesAPresetOnlyBlock(t *testing.T) {
+	root := unclassifiedProject(t)
+	env, _, _ := testEnv()
+	core := schema.Schema{Tables: []schema.Table{{Name: "wp_options", Columns: []schema.Column{
+		{Name: "option_id", Type: "bigint", Declared: "bigint(20) unsigned"},
+		{Name: "option_value", Type: "longtext", Declared: "longtext"},
+	}}}}
+
+	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", core)); err != nil {
+		t.Fatalf("runAnonymizeInit() = %v, want a preset reference written", err)
+	}
+
+	a := written(t, root).Anonymize
+	if a.Preset != "wordpress" || len(a.Tables) != 0 {
+		t.Errorf("anonymize = %+v, want the preset alone", a)
 	}
 }
 

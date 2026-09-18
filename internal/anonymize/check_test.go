@@ -264,21 +264,44 @@ func TestCheckRefusesAnApprovalOfAnUnclassifiedColumn(t *testing.T) {
 	}
 }
 
-// A Preset is referenced and never expanded, so a column missing from `tables` may
-// well be one the Preset classifies. Silence is the honest answer until the Preset
-// can be read.
-func TestCheckDoesNotGuessAtColumnsAPresetMayClassify(t *testing.T) {
+// An Approval may name a column only the Preset classifies. The Preset is read in
+// first, so `check` knows the column is kept and the approval means what it says.
+func TestCheckAcceptsAnApprovalOfAColumnOnlyThePresetClassifies(t *testing.T) {
 	cfg := project(map[string]config.Table{
-		"users": columns(map[string]config.Column{"email": {Action: "fake.email"}}),
+		"plugin_leads": columns(map[string]config.Column{"email": {Action: "fake.email"}}),
 	}, map[string]config.Environment{
 		"staging": {Anonymize: &config.EnvironmentAnonymize{
-			Approved: []config.ColumnRef{{Table: "posts", Column: "post_author"}},
+			Approved: []config.ColumnRef{{Table: "wp_posts", Column: "post_content"}},
 		}},
 	})
 	cfg.Anonymize.Preset = "wordpress"
 
-	if _, problems := anonymize.Check(cfg, names(cfg)); len(problems) != 0 {
-		t.Errorf("Check() = %v, want no guess about what the preset covers", problems)
+	resolved, problems := anonymize.Resolve(cfg)
+	if len(problems) != 0 {
+		t.Fatalf("Resolve() = %v, want the shipped preset read in", problems)
+	}
+	if _, problems := anonymize.Check(resolved, names(resolved)); len(problems) != 0 {
+		t.Errorf("Check() = %v, want an approval of a preset-kept column accepted", problems)
+	}
+}
+
+// Naming a Preset is not a blanket excuse for a column nobody classifies. Once the
+// Preset is read in, a column still missing from the answer is missing from it.
+func TestCheckStillRefusesAnApprovalNoPresetClassifies(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"plugin_leads": columns(map[string]config.Column{"email": {Action: "fake.email"}}),
+	}, map[string]config.Environment{
+		"staging": {Anonymize: &config.EnvironmentAnonymize{
+			Approved: []config.ColumnRef{{Table: "plugin_leads", Column: "internal_note"}},
+		}},
+	})
+	cfg.Anonymize.Preset = "wordpress"
+
+	resolved, _ := anonymize.Resolve(cfg)
+	problem := only(t, problemsOf(resolved, names(resolved)))
+
+	if !strings.Contains(problem.Detail, "plugin_leads.internal_note") {
+		t.Errorf("Detail = %q, want it to name the column nothing classifies", problem.Detail)
 	}
 }
 

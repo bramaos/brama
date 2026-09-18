@@ -24,10 +24,6 @@ type Coverage struct {
 	// its name alone, because the caller that acts on this — `anonymize init` — picks
 	// a Generator by name *and* type, and a name on its own cannot be claimed.
 	Unclassified []Uncovered
-	// Unexpanded names the Preset holding the part of the answer brama could not
-	// read, and is empty when the file names none. While it is set, Unclassified is
-	// not the whole story and Complete says nothing.
-	Unexpanded string
 }
 
 // Complete reports whether every column of the Schema is answered for.
@@ -55,6 +51,10 @@ func (u Uncovered) String() string { return u.Table + "." + u.Column.Name }
 // than only as problems, because `anonymize init` walks the same ground: what init
 // writes a Classification for is exactly this Unclassified list.
 //
+// a is the resolved Classification — what the file says with the Preset it names read
+// in, from Resolve. A Preset answers for columns brama.yaml never mentions, and passing
+// the unresolved file here would report every one of them as Unclassified.
+//
 // a may be nil, which classifies nothing and leaves every column of the Schema
 // uncovered.
 func Cover(a *config.Anonymize, s schema.Schema) (Coverage, []Problem) {
@@ -62,7 +62,7 @@ func Cover(a *config.Anonymize, s schema.Schema) (Coverage, []Problem) {
 		a = &config.Anonymize{}
 	}
 
-	coverage := Coverage{Unexpanded: a.Preset}
+	var coverage Coverage
 	var problems []Problem
 
 	for _, t := range s.Tables {
@@ -85,14 +85,7 @@ func Cover(a *config.Anonymize, s schema.Schema) (Coverage, []Problem) {
 
 			column, ok := classified.Columns[col.Name]
 			if !ok {
-				// With a Preset named, this is most likely a column the Preset
-				// classifies. Presets are referenced and never expanded here (ADR
-				// 0011), so brama cannot tell those from the genuinely unanswered —
-				// and the honest answer is the silence checkApprovals keeps for the
-				// same reason, said out loud through Unexpanded.
-				if coverage.Unexpanded == "" {
-					coverage.Unclassified = append(coverage.Unclassified, Uncovered{Table: t.Name, Column: col})
-				}
+				coverage.Unclassified = append(coverage.Unclassified, Uncovered{Table: t.Name, Column: col})
 				continue
 			}
 

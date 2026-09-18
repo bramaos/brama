@@ -11,6 +11,32 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Classify a project with `anonymize.preset`, which names a classification brama
+  ships for a framework it knows rather than spelling it out. `tables:` then holds
+  only what is specific to your project and the overrides you meant, so the block
+  stays short enough to read in a diff. (#53, #7)
+- Ship a `wordpress` preset covering the twelve tables a default WordPress install
+  creates — fabricating the account and comment-author details, dropping live
+  password-reset tokens and login sessions, and keeping the site's own content and
+  configuration. (#53, #7)
+- Reference the preset rather than copying it, so a preset brama tightens in a later
+  release reaches your project without anyone editing `brama.yaml`. (#53, #7)
+- Let `anonymize.tables` override a preset one column at a time. Writing a column of
+  a table the preset knows changes that column and leaves the rest of the table to
+  the preset. (#53, #7)
+- Write `preset: <name>` from `brama anonymize init` when brama ships one for your
+  adapter, and leave the columns it already answers for out of the file. A preset is
+  a deliberate statement about a table brama knows; a generator's name pattern is an
+  inference, and the specific one wins. (#53, #7)
+- Count the columns a preset classifies as classified in `brama anonymize check`,
+  without expanding them into the file — so a check against a reachable environment
+  can now report full column coverage on a project that names one. (#53, #7)
+- Refuse an `anonymize.preset` naming a preset brama does not ship, listing the ones
+  it does. A name that resolved to nothing would silently unclassify every column the
+  preset was carrying. (#53, #7)
+- Grant no approval from a preset. A preset says what a column holds and never who
+  may receive it, so a column it classifies `keep` still sends real values nowhere
+  until a human approves it for that environment. (#53, #7)
 - Add `brama anonymize init`, which reads an environment's schema and writes the
   classification for every column a generator claims — by name and by type — as
   `action: fake.<generator>`. It is the file `brama init` deliberately does not write.

@@ -26,6 +26,10 @@ type AnonymizeCheckResult struct {
 	Path         string
 	Environments []string
 	Summary      anonymize.Summary
+	// Preset names the Preset the file references, and is empty when it references
+	// none. The Summary counts what that Preset classifies, so saying where those
+	// columns came from is what stops the counts reading as a file nobody can find.
+	Preset string
 	// SchemaFrom names the Environment whose Schema the classification was compared
 	// against, and is empty when none could be reached.
 	SchemaFrom string
@@ -47,9 +51,6 @@ type coverageState int
 const (
 	// coverageUnread is a run that reached no Environment and read no Schema.
 	coverageUnread coverageState = iota
-	// coverageUnexpanded read a Schema and cannot compare against it: a Preset holds
-	// part of the classification, and brama cannot yet expand one.
-	coverageUnexpanded
 	// coverageIncomplete compared the two and found columns nothing classifies.
 	coverageIncomplete
 	// coverageComplete compared the two and every column is answered for.
@@ -66,8 +67,6 @@ func (r *AnonymizeCheckResult) coverage() coverageState {
 	switch {
 	case r.Coverage == nil:
 		return coverageUnread
-	case r.Coverage.Unexpanded != "":
-		return coverageUnexpanded
 	case r.Coverage.Complete():
 		return coverageComplete
 	default:
@@ -91,6 +90,9 @@ func (r *AnonymizeCheckResult) Status() renderer.Status {
 func (r *AnonymizeCheckResult) Headline() string {
 	classifies := fmt.Sprintf("%s in %s",
 		plural(r.Summary.Columns, "column"), plural(r.Summary.Tables, "table"))
+	if r.Preset != "" {
+		classifies += fmt.Sprintf(" with the %s preset", r.Preset)
+	}
 
 	switch r.coverage() {
 	case coverageComplete:
@@ -113,11 +115,6 @@ func (r *AnonymizeCheckResult) Notes() []string {
 	case coverageUnread:
 		return []string{"column coverage was not verified — this run read no schema, " +
 			"and a column the database has and this file does not is still unclassified"}
-	case coverageUnexpanded:
-		return []string{fmt.Sprintf(
-			"column coverage was not verified — the %s preset is referenced and not expanded, "+
-				"so brama cannot yet tell a column it classifies from one nobody did",
-			r.Coverage.Unexpanded)}
 	case coverageIncomplete:
 		notes := make([]string, 0, len(r.Coverage.Unclassified)+1)
 		notes = append(notes, fmt.Sprintf("unclassified in %s — a pull refuses until each one is decided:", r.SchemaFrom))
@@ -136,6 +133,7 @@ func (r *AnonymizeCheckResult) Fields() []renderer.Field {
 	fields := renderer.Fields{}.
 		Add("file", "File", r.Path).
 		Add("environments", "Environments", r.Environments).
+		AddOptional("preset", "Preset", r.Preset, "none").
 		Add("tables", "Tables", r.Summary.Tables).
 		Add("columns", "Columns", r.Summary.Columns).
 		Add("correlation_groups", "Correlation groups", r.Summary.Groups).
@@ -237,15 +235,35 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 			"brama anonymize init")
 	}
 
-	summary, problems := anonymize.Check(cfg, environments)
+	// The Preset is read in before anything is checked, and never written back. What
+	// the file says plus what the Preset ships is what a Pull would act on, so it is
+	// what `check` has to hold up — a column the Preset classifies is not a column
+	// anybody left undecided.
+	//
+	// A name that did not resolve stops the run here rather than joining the report.
+	// Everything after this point reads the Preset's answers as classification, so
+	// carrying on without them would call every column it was holding unclassified and
+	// refuse every approval of one — a hundred lines of consequence stacked on top of
+	// the one typo that caused them.
+	resolved, unresolved := anonymize.Resolve(cfg)
+	if len(unresolved) > 0 {
+		return refusal.New(refusal.Invalid, problemDetail(unresolved), "")
+	}
 
-	result := &AnonymizeCheckResult{Path: path, Environments: environments, Summary: summary}
+	summary, problems := anonymize.Check(resolved, environments)
+
+	result := &AnonymizeCheckResult{
+		Path:         path,
+		Environments: environments,
+		Summary:      summary,
+		Preset:       resolved.Anonymize.Preset,
+	}
 	read, from, err := readSchema(ctx, cfg, environments, source)
 	if err != nil {
 		return err
 	}
 	if from != "" {
-		coverage, uncoverable := anonymize.Cover(cfg.Anonymize, read)
+		coverage, uncoverable := anonymize.Cover(resolved.Anonymize, read)
 		result.SchemaFrom, result.Coverage = from, &coverage
 		problems = append(problems, uncoverable...)
 	}

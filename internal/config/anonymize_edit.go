@@ -44,22 +44,27 @@ type ColumnClassification struct {
 // comes through byte for byte. Where `brama init` left its commented note saying there
 // is no classification yet, the block takes its place; otherwise it goes at the end.
 //
+// preset names the Preset the project's Adapter ships, and is empty when brama ships
+// none. It is written as a name and the Classification behind it is not: `tables` then
+// holds only what the Preset does not cover, and a Preset brama tightens reaches this
+// project without the file being edited again. See ADR 0011.
+//
 // tables is written as given and nothing is sorted here. What order a Classification
 // is reviewed in is the caller's decision, and it has the Schema this one came from.
-func AddAnonymize(doc []byte, tables []TableClassification) ([]byte, error) {
-	if len(tables) == 0 {
+func AddAnonymize(doc []byte, preset string, tables []TableClassification) ([]byte, error) {
+	if preset == "" && len(tables) == 0 {
 		// An `anonymize:` with nothing under it classifies nothing, which is the state
 		// the file is already in — and `anonymize check` refuses it by name. Writing it
 		// would turn "brama recognised none of your columns" into a file that looks
 		// decided and is not.
-		return nil, errors.New("nothing to write — no column was claimed by a generator")
+		return nil, errors.New("nothing to write — no preset covers this project and no column was claimed by a generator")
 	}
 	if err := noAnonymizeBlock(doc); err != nil {
 		return nil, err
 	}
 
 	lines := splitLines(doc)
-	block := renderAnonymize(tables)
+	block := renderAnonymize(preset, tables)
 
 	if start, end, ok := anonymizeNote(lines); ok {
 		return joinLines(replaceRange(lines, start, end, block)), nil
@@ -98,8 +103,17 @@ func noAnonymizeBlock(doc []byte) error {
 
 // renderAnonymize writes the block. Only `columns` is emitted: a key/value table's
 // discriminator is a fact about rows, and `init` reads no rows.
-func renderAnonymize(tables []TableClassification) []string {
-	out := []string{"anonymize:", "  tables:"}
+func renderAnonymize(preset string, tables []TableClassification) []string {
+	out := []string{"anonymize:"}
+	if preset != "" {
+		out = append(out, "  preset: "+preset)
+	}
+	if len(tables) == 0 {
+		// A Preset that covered everything. `tables:` with nothing under it would parse
+		// as an empty mapping and read, in the diff, as a list somebody forgot to fill.
+		return out
+	}
+	out = append(out, "  tables:")
 	for _, t := range tables {
 		out = append(out, "    "+t.Name+":", "      columns:")
 		for _, c := range t.Columns {

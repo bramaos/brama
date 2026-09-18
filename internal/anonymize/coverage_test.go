@@ -231,28 +231,28 @@ func TestCoverTreatsADiscriminatorAndItsValueColumnAsAnsweredFor(t *testing.T) {
 	}
 }
 
-// A Preset is referenced and never expanded, so the columns it classifies are not in
-// this file. Calling every one of them Unclassified would be an answer brama cannot
-// support, and silence is the honest one — said out loud, not by omission.
-func TestCoverSaysItCannotAnswerForAFileThatNamesAPreset(t *testing.T) {
+// A Preset is read in before coverage is compared, so a column it classifies is a
+// classified column here — answered for without being written into the file. What the
+// preset does not know is still reported, which is the only part left to decide.
+func TestCoverCountsAPresetColumnAsClassified(t *testing.T) {
 	cfg := project(map[string]config.Table{
-		"users": columns(map[string]config.Column{"email": {Action: "fake.email"}}),
+		"plugin_leads": columns(map[string]config.Column{"email": {Action: "fake.email"}}),
 	}, nil)
 	cfg.Anonymize.Preset = "wordpress"
 
-	coverage, problems := anonymize.Cover(cfg.Anonymize, schemaOf(
-		table("users", varchar("email", 20), varchar("internal_note", 255)),
+	resolved, problems := anonymize.Resolve(cfg)
+	if len(problems) != 0 {
+		t.Fatalf("Resolve() = %v, want the shipped preset read in", problems)
+	}
+
+	coverage, _ := anonymize.Cover(resolved.Anonymize, schemaOf(
+		table("wp_users", varchar("user_email", 100), varchar("display_name", 250)),
+		table("plugin_leads", varchar("email", 100), varchar("internal_note", 255)),
 	))
 
-	if coverage.Unexpanded != "wordpress" {
-		t.Errorf("Unexpanded = %q, want the preset that holds the rest of the answer", coverage.Unexpanded)
-	}
-	if len(coverage.Unclassified) != 0 {
-		t.Errorf("Unclassified = %v, want nothing claimed while a preset is unexpanded", uncovered(coverage))
-	}
-	// The fit of a Generator the file does name is still answerable, and still answered.
-	if len(problems) != 1 {
-		t.Errorf("Cover() = %v, want the generator that cannot fit still refused", problems)
+	if !equal(uncovered(coverage), []string{"plugin_leads.internal_note"}) {
+		t.Errorf("Unclassified = %v, want only the column neither the preset nor the file answers for",
+			uncovered(coverage))
 	}
 }
 
