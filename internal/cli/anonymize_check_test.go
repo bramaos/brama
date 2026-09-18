@@ -2,15 +2,19 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/refusal"
 	"github.com/bramaos/brama/internal/renderer"
+	"github.com/bramaos/brama/internal/schema"
 )
 
 // classifiedProject writes a valid brama.yaml carrying the given anonymize block. It
@@ -93,10 +97,10 @@ func TestCheckPassesAConsistentFile(t *testing.T) {
 	root := classifiedProject(t, consistent)
 	env, out, _ := testEnv()
 
-	if err := runAnonymizeCheck(env, root, ""); err != nil {
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
 		t.Fatalf("runAnonymizeCheck() = %v, want success", err)
 	}
-	if !strings.Contains(out.String(), "is consistent") {
+	if !strings.Contains(out.String(), "holds together") {
 		t.Errorf("output does not report the outcome:\n%s", out.String())
 	}
 }
@@ -112,7 +116,7 @@ func TestCheckWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runAnonymizeCheck(env, root, ""); err != nil {
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
 		t.Fatal(err)
 	}
 
@@ -142,7 +146,7 @@ func TestCheckRefusesAnUnknownGenerator(t *testing.T) {
 `)
 	env, _, _ := testEnv()
 
-	r := refused(t, runAnonymizeCheck(env, root, ""))
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", unreachable))
 
 	if r.Reason != refusal.Invalid {
 		t.Errorf("Reason = %q, want %q", r.Reason, refusal.Invalid)
@@ -158,7 +162,7 @@ func TestCheckRefusesAFileThatClassifiesNothing(t *testing.T) {
 	root := classifiedProject(t, "")
 	env, _, _ := testEnv()
 
-	r := refused(t, runAnonymizeCheck(env, root, ""))
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", unreachable))
 
 	if r.Reason != refusal.Unclassified {
 		t.Errorf("Reason = %q, want %q", r.Reason, refusal.Unclassified)
@@ -183,7 +187,7 @@ func TestCheckReportsEveryProblemAtOnce(t *testing.T) {
 `)
 	env, _, _ := testEnv()
 
-	r := refused(t, runAnonymizeCheck(env, root, ""))
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", unreachable))
 
 	if !strings.Contains(r.Detail, "2 problems") {
 		t.Errorf("Detail = %q, want both problems reported", r.Detail)
@@ -196,12 +200,12 @@ func TestCheckValidatesEveryEnvironmentByDefault(t *testing.T) {
 	root := projectFile(t, consistent, map[string]string{"local": "users.email"})
 	env, _, _ := testEnv()
 
-	r := refused(t, runAnonymizeCheck(env, root, ""))
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", unreachable))
 	if !strings.Contains(r.Detail, "users.email") {
 		t.Errorf("Detail = %q, want local's approval reported without being asked for it", r.Detail)
 	}
 
-	if err := runAnonymizeCheck(env, root, "staging"); err != nil {
+	if err := runAnonymizeCheck(t.Context(), env, root, "staging", unreachable); err != nil {
 		t.Errorf("runAnonymizeCheck(--env staging) = %v, want local's problem left out", err)
 	}
 }
@@ -210,7 +214,7 @@ func TestCheckRejectsAnEnvironmentThatDoesNotExist(t *testing.T) {
 	root := classifiedProject(t, consistent)
 	env, _, _ := testEnv()
 
-	err := runAnonymizeCheck(env, root, "prod")
+	err := runAnonymizeCheck(t.Context(), env, root, "prod", unreachable)
 
 	if err == nil {
 		t.Fatal("runAnonymizeCheck() = nil, want an unknown environment reported")
@@ -230,7 +234,7 @@ func TestCheckRendersTheResultAsJSONAndHasNoCIFlag(t *testing.T) {
 	var out bytes.Buffer
 	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
 
-	if err := runAnonymizeCheck(env, root, ""); err != nil {
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
 		t.Fatalf("runAnonymizeCheck() = %v", err)
 	}
 
@@ -238,7 +242,8 @@ func TestCheckRendersTheResultAsJSONAndHasNoCIFlag(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
 	}
-	if payload["action"] != "anonymize_check" || payload["status"] != "success" {
+	// Partial, not success: nothing read a schema, so column coverage went unverified.
+	if payload["action"] != "anonymize_check" || payload["status"] != "partial" {
 		t.Errorf("payload = %v, want the anonymize_check contract", payload)
 	}
 	if _, ok := payload["columns"]; !ok {
@@ -277,5 +282,170 @@ func TestCheckResultNamesWhatItChecked(t *testing.T) {
 	// A clean offline run is not a clean bill of health.
 	if len(result.Notes()) == 0 {
 		t.Error("Notes() is empty, want it to say column coverage was not verified")
+	}
+}
+
+// reachable is a schemaSource that answers with a fixed Schema, standing in for an
+// environment brama has a route to.
+func reachable(from string, s schema.Schema) schemaSource {
+	return func(_ context.Context, _ *config.Config, environment string) (schema.Schema, error) {
+		if environment != from {
+			return schema.Schema{}, errUnreachable
+		}
+		return s, nil
+	}
+}
+
+// usersAndOrders is the schema the `consistent` block classifies, plus one column it
+// says nothing about.
+func usersAndOrders(extra ...schema.Column) schema.Schema {
+	users := schema.Table{Name: "users", Columns: append([]schema.Column{
+		{Name: "email", Type: "varchar", Declared: "varchar(100)", Length: 100},
+		{Name: "display_name", Type: "varchar", Declared: "varchar(250)", Length: 250},
+	}, extra...)}
+	orders := schema.Table{Name: "orders", Columns: []schema.Column{
+		{Name: "billing_email", Type: "varchar", Declared: "varchar(200)", Length: 200},
+	}}
+	return schema.Schema{Database: "acme", Tables: []schema.Table{users, orders}}
+}
+
+// With a schema to compare against, a clean check is a clean bill of health and says so.
+func TestCheckReportsSuccessOnlyWhenItVerifiedColumnCoverage(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", usersAndOrders())); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want success", err)
+	}
+	if !strings.Contains(out.String(), "covering every column staging has") {
+		t.Errorf("output does not name what it verified:\n%s", out.String())
+	}
+}
+
+// The whole point of needing a database: only a schema can say the column is there.
+func TestCheckReportsAColumnTheSchemaHasAndTheFileDoesNot(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	env, out, _ := testEnv()
+	note := schema.Column{Name: "internal_note", Type: "text", Declared: "text"}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", usersAndOrders(note))); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want the column reported and not refused", err)
+	}
+	if !strings.Contains(out.String(), "users.internal_note") {
+		t.Errorf("output does not name the unclassified column:\n%s", out.String())
+	}
+}
+
+// fake.email on a varchar(20) is a value truncated on insert, or an error raised
+// halfway through a dump on a production server. ADR 0013 stops it in the editor.
+func TestCheckRefusesAGeneratorThatCannotFitTheColumn(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	env, _, _ := testEnv()
+	narrow := usersAndOrders()
+	narrow.Tables[0].Columns[0] = schema.Column{
+		Name: "email", Type: "varchar", Declared: "varchar(20)", Length: 20,
+	}
+
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", narrow)))
+
+	if r.Reason != refusal.Invalid {
+		t.Errorf("Reason = %q, want %q", r.Reason, refusal.Invalid)
+	}
+	if !strings.Contains(r.Detail, "varchar(20)") {
+		t.Errorf("Detail = %q, want the column that cannot hold the value", r.Detail)
+	}
+}
+
+// Unverified is not success. A caller reading only the status must not take a run that
+// saw no columns for one that found nothing wrong with them.
+func TestCheckSaysColumnCoverageWentUnverified(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, Renderer: renderer.NewHuman(&out, &out)}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want it to run to completion", err)
+	}
+	if !strings.Contains(out.String(), "column coverage was not verified") {
+		t.Errorf("output does not say coverage went unverified:\n%s", out.String())
+	}
+
+	result := &AnonymizeCheckResult{Path: "/x/brama.yaml"}
+	if result.Status() != renderer.StatusPartial {
+		t.Errorf("Status() = %q, want partial — nothing read a schema", result.Status())
+	}
+}
+
+// A database that answered and then could not be read is not the same as no database,
+// and carrying on would report coverage as unverified for a reason someone can fix.
+func TestCheckFailsWhenAReachableEnvironmentCannotBeRead(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	env, _, _ := testEnv()
+	broken := func(context.Context, *config.Config, string) (schema.Schema, error) {
+		return schema.Schema{}, errors.New("information_schema is not readable by this user")
+	}
+
+	err := runAnonymizeCheck(t.Context(), env, root, "", broken)
+
+	if err == nil {
+		t.Fatal("runAnonymizeCheck() = nil, want the failure reported")
+	}
+	if _, isRefusal := refusal.As(err); isRefusal {
+		t.Error("an unreadable schema refused, want an error — nothing was declined")
+	}
+}
+
+// One schema is enough, and it is the first that answers: the classification is
+// project-wide, and drift between two environments is not a contradiction in the file.
+func TestCheckComparesAgainstOneSchemaAndNamesWhichOne(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	env, _, _ := testEnv()
+	var asked []string
+	counting := func(ctx context.Context, cfg *config.Config, name string) (schema.Schema, error) {
+		asked = append(asked, name)
+		return reachable("staging", usersAndOrders())(ctx, cfg, name)
+	}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", counting); err != nil {
+		t.Fatal(err)
+	}
+
+	// local sorts before staging, is unreachable, and is skipped past.
+	if len(asked) != 2 || asked[0] != "local" || asked[1] != "staging" {
+		t.Errorf("asked = %v, want it to stop at the first environment that answered", asked)
+	}
+}
+
+// The machine contract carries the same keys either way, and `schema` is what says
+// which run this was. Zero unclassified columns off a run that saw none is not a fact.
+func TestCheckResultReportsCoverageInTheContract(t *testing.T) {
+	coverage := anonymize.Coverage{
+		Columns:      4,
+		Unclassified: []anonymize.Uncovered{{Table: "users", Column: schema.Column{Name: "internal_note"}}},
+	}
+	verified := &AnonymizeCheckResult{Path: "/x/brama.yaml", SchemaFrom: "staging", Coverage: &coverage}
+	unverified := &AnonymizeCheckResult{Path: "/x/brama.yaml"}
+
+	for _, result := range []*AnonymizeCheckResult{verified, unverified} {
+		keys := map[string]any{}
+		for _, f := range result.Fields() {
+			keys[f.Key] = f.Value
+		}
+		for _, key := range []string{"schema", "schema_columns", "unclassified_columns"} {
+			if _, ok := keys[key]; !ok {
+				t.Errorf("fields = %v, want key %q on every run", keys, key)
+			}
+		}
+	}
+
+	fields := map[string]any{}
+	for _, f := range verified.Fields() {
+		fields[f.Key] = f.Value
+	}
+	if fields["schema"] != "staging" || fields["schema_columns"] != 4 || fields["unclassified_columns"] != 1 {
+		t.Errorf("fields = %v, want the comparison it made", fields)
+	}
+	if verified.Status() != renderer.StatusPartial {
+		t.Errorf("Status() = %q, want partial with a column unclassified", verified.Status())
 	}
 }

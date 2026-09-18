@@ -11,6 +11,17 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Compare the classification against the schema of a reachable environment, and name
+  every column the database has that `brama.yaml` says nothing about. Only a schema can
+  say a column is there at all, so this is the half of `brama anonymize check` that a CI
+  runner cannot answer. (#51, #7)
+- Refuse a `fake.<generator>` that cannot fill the column it was given — `fake.email` on
+  a `varchar(20)`, or on an `int` — while the file is still open in an editor, rather
+  than partway through a dump on a production server. (#51, #7)
+- Report `brama anonymize check` as `partial` rather than `success` when no environment
+  was reachable, naming the column coverage it could not verify. A clean run against no
+  schema is not a clean bill of health, and a caller reading only the status must not
+  take one for the other. (#51, #7)
 - Add `brama anonymize check`, which validates the classification in `brama.yaml`
   and exits 42 when it does not hold together. It writes nothing and reaches no
   database, so it runs on a CI runner with no route to production. (#50, #7)

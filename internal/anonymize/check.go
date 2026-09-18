@@ -6,7 +6,9 @@
 // anyone to correlate with, and whether an Environment approves columns the file
 // actually classifies. That split is the point — `brama anonymize check` has to mean
 // something on a CI runner with no route to production, which is what ADR 0013 closes
-// the Generator vocabulary for. The half that needs a Schema is a separate pass.
+// the Generator vocabulary for. The half that needs a Schema is Cover, in coverage.go,
+// and a run that could not reach one says so rather than reporting a clean bill of
+// health it did not earn.
 //
 // It reports every problem it finds rather than the first. Someone fixing a
 // classification is reading the whole block anyway, and one problem per run is how a

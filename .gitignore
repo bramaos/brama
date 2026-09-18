@@ -33,7 +33,9 @@ internal/shim/bin/shim-*
 # --- Go test & tooling artifacts ---------------------------------------------
 *.test
 *.out
-coverage.*
+# Named, not globbed: `coverage.*` also matched internal/anonymize/coverage.go and
+# left it untracked in a tree that still built locally.
+/coverage.html
 /vendor/
 go.work
 go.work.sum
