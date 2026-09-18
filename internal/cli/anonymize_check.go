@@ -35,6 +35,10 @@ type AnonymizeCheckResult struct {
 	// brama acts on. It is empty on a project that names no Preset, and on one whose
 	// record agrees with the one it names.
 	Drift preset.Drifts
+	// Fallbacks is what Classification and Approval resolve to together, at each of the
+	// Environments this run checked: the `keep` columns none of them approves, and what
+	// each would receive instead. It is derived on every run and written nowhere.
+	Fallbacks anonymize.Fallbacks
 	// SchemaFrom names the Environment whose Schema the classification was compared
 	// against, and is empty when none could be reached.
 	SchemaFrom string
@@ -89,8 +93,11 @@ func (r *AnonymizeCheckResult) coverage() coverageState {
 // something for a person to do either way round — accept a loosening, or write an
 // applied tightening back into the file — and a run that reported success would be
 // telling a caller there was nothing left.
+// So is a `keep` with no approval and nothing to fall back to: the file holds together,
+// and a pull to that destination still refuses until someone decides. A substitution is
+// not, because nothing is left over from one — it is the model working.
 func (r *AnonymizeCheckResult) Status() renderer.Status {
-	if r.coverage() == coverageComplete && len(r.Drift) == 0 {
+	if r.coverage() == coverageComplete && len(r.Drift) == 0 && len(r.Fallbacks.NoFallback()) == 0 {
 		return renderer.StatusSuccess
 	}
 	return renderer.StatusPartial
@@ -120,7 +127,60 @@ func (r *AnonymizeCheckResult) Headline() string {
 // Notes says what this run could not settle, and names what it found that the file
 // does not. A clean check is not a clean bill of health unless it read a schema.
 func (r *AnonymizeCheckResult) Notes() []string {
-	return append(r.driftNotes(), r.coverageNotes()...)
+	notes := append(r.driftNotes(), r.approvalNotes()...)
+	return append(notes, r.coverageNotes()...)
+}
+
+// approvalNotes says what each destination would actually receive, wherever that is not
+// what the file says on its own.
+//
+// Kept in two blocks for the same reason drift is. A substitution is brama carrying the
+// model out and needs nothing from anybody; a column with nothing to fall back to stops
+// a pull that has not been written yet, and is the one thing here a person has to act
+// on before it can run.
+func (r *AnonymizeCheckResult) approvalNotes() []string {
+	var notes []string
+	if substituted := r.Fallbacks.Substituted(); len(substituted) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"%s classified keep %s not approved %s, so a generator stands in and "+
+				"a pull sends fabricated values:",
+			plural(len(substituted), "column"), isAre(len(substituted)), whereItLands(len(substituted))))
+		notes = append(notes, indentAll(fallbackNames(substituted))...)
+	}
+	if stranded := r.Fallbacks.NoFallback(); len(stranded) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"%s classified keep %s neither approved nor claimed by a generator, and brama will not "+
+				"empty a column on its own authority — so a pull refuses until each is approved, "+
+				"or classified fake.<generator> or drop:",
+			plural(len(stranded), "column"), isAre(len(stranded))))
+		notes = append(notes, indentAll(fallbackNames(stranded))...)
+	}
+	return notes
+}
+
+// fallbackNames is the resolution as both audiences read it — one line a column, naming
+// the destination it is about, because the same column resolves two ways at two of them.
+func fallbackNames(fallbacks anonymize.Fallbacks) []string {
+	out := make([]string, 0, len(fallbacks))
+	for _, f := range fallbacks {
+		out = append(out, f.String())
+	}
+	return out
+}
+
+func indentAll(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, "  "+line)
+	}
+	return out
+}
+
+func whereItLands(n int) string {
+	if n == 1 {
+		return "where it lands"
+	}
+	return "where they land"
 }
 
 // driftNotes says where the Preset and the file disagree, in two blocks that never run
@@ -222,7 +282,12 @@ func (r *AnonymizeCheckResult) Fields() []renderer.Field {
 		// are contract-only: the same columns reach a person through the Notes, in prose
 		// that does not wrap off the screen at ten of them.
 		AddContractOnly("preset_drift_applied", driftNames(r.Drift.Applied())).
-		AddContractOnly("preset_drift_held", driftNames(r.Drift.Held()))
+		AddContractOnly("preset_drift_held", driftNames(r.Drift.Held())).
+		// The resolution, split the same way and for the same reason: one of these is a
+		// pull that runs and says what it substituted, the other is a pull that refuses.
+		// A caller acting on one key for both would gate a release on the wrong half.
+		AddContractOnly("keep_substituted", fallbackNames(r.Fallbacks.Substituted())).
+		AddContractOnly("keep_no_fallback", fallbackNames(r.Fallbacks.NoFallback()))
 
 	// The coverage keys are always present, so a caller reads the same shape from
 	// every run. Which one it is reading is what `schema` and the notes answer: where
@@ -275,6 +340,10 @@ func newAnonymizeCheckCmd(env *console) *cobra.Command {
 			"about: the ones the preset now classifies more strictly, which brama applies\n" +
 			"on its own, and the ones it classifies less strictly, which are held until\n" +
 			"`brama anonymize review` accepts them.\n\n" +
+			"It then reads classification and approval together, per environment, and says\n" +
+			"what each would actually receive: the kept columns it has not approved, which\n" +
+			"a generator stands in for, and the ones no generator claims — where a pull\n" +
+			"refuses rather than emptying a column nobody asked it to empty.\n\n" +
 			"It writes nothing, and it runs on a CI runner with no route to production.\n" +
 			"Where an environment is reachable it also reads that database's schema and\n" +
 			"compares the two: which columns nothing classifies, and whether a generator\n" +
@@ -341,12 +410,18 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 
 	summary, problems := anonymize.Check(resolved, environments, drift)
 
+	// What each destination would receive, which is Classification and Approval read
+	// together. It is reported rather than refused: `check` validates the file, and a
+	// `keep` nothing claims is not a file that contradicts itself — it is a pull that
+	// will refuse, named here before anyone runs one. The Refusal itself belongs to the
+	// operation that moves data, and is anonymize.Refuse.
 	result := &AnonymizeCheckResult{
 		Path:         path,
 		Environments: environments,
 		Summary:      summary,
 		Preset:       resolved.Anonymize.Preset,
 		Drift:        drift,
+		Fallbacks:    anonymize.Effective(resolved, environments),
 	}
 	read, from, err := readSchema(ctx, cfg, environments, source)
 	if err != nil {

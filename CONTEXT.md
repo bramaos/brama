@@ -103,6 +103,17 @@ Classification: Classification settles what a column means, Approval settles whe
 values may go. Only a human grants one.
 _Avoid_: consent, exception, allowlist, override
 
+**Substitution**:
+What an Environment receives in place of a `keep` column's real values when it holds no
+Approval for that column: the Classification the Generator claiming the column would have
+given it. Derived on every run from Classification plus Approval, never written down, so a
+column carries one `action` and no per-destination shadow of it. Where no Generator claims
+the column there is no Substitution and the operation refuses — Brama may reduce exposure
+by derivation, it may not invent destructive policy. Said of the value; "falls back" is
+said of the resolution that produces it, and a column nothing claims is one with no
+fallback.
+_Avoid_: default, downgrade, override, redaction
+
 **Discriminator**:
 The column whose value selects which Classification applies to a row, for tables that
 store many kinds of value in one column — `wp_usermeta.meta_key`. The column it selects

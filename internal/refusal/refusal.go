@@ -20,6 +20,12 @@ const (
 	// group with one member. Distinct from Unclassified: a decision was written
 	// down, and it is not one that can be acted on.
 	Invalid Reason = "invalid_classification"
+	// NoFallback is a `keep` column the destination has not approved and no Generator
+	// claims, so there is nothing to send it as. Brama may reduce exposure by
+	// derivation — it may not invent destructive policy by emptying a column nobody
+	// asked it to empty — so it stops and names the column instead.
+	// See docs/adr/0010-classification-and-approval-are-separate-axes.md.
+	NoFallback Reason = "no_fallback"
 )
 
 // Refusal is a declined operation.

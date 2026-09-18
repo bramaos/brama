@@ -187,7 +187,17 @@ type entry struct {
 	// at is the key it was written under.
 	at string
 	// name is what to call it in a sentence — `users.email`.
-	name   string
+	name string
+	// table is the table it belongs to, and field is the column name, or the
+	// Discriminator value for a keyed entry. The two are what an Approval is matched
+	// against and what a Generator is asked to claim, neither of which can be read
+	// back out of name.
+	table string
+	field string
+	// keyed says the entry is one Discriminator value rather than a column. An
+	// Approval names a `table.column` and so can never reach one: the column it would
+	// name holds every key's value at once, which is why approving it is refused.
+	keyed  bool
 	column config.Column
 }
 
@@ -205,6 +215,9 @@ func entries(a *config.Anonymize) []entry {
 			out = append(out, entry{
 				at:     at + ".keys." + key,
 				name:   table + "." + t.Discriminator + "=" + key,
+				table:  table,
+				field:  key,
+				keyed:  true,
 				column: t.Keys[key],
 			})
 		}
@@ -212,6 +225,8 @@ func entries(a *config.Anonymize) []entry {
 			out = append(out, entry{
 				at:     at + ".columns." + column,
 				name:   table + "." + column,
+				table:  table,
+				field:  column,
 				column: t.Columns[column],
 			})
 		}

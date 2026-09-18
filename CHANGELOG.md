@@ -11,6 +11,23 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Resolve what each environment would actually receive, from its
+  `environments.<name>.anonymize.approved` list read together with the classification. An
+  approval counts for that environment and no other, so the same `keep` column can send
+  real values to staging and fabricated ones to a laptop. (#55, #7)
+- Send a kept column the destination has not approved as the value its generator would
+  have produced, rather than as the real one. A pull can only ever expose less than the
+  file suggests, never more. (#55, #7)
+- Refuse instead, with reason `no_fallback` and exit code 42, where no generator claims
+  the column: emptying a column brama could not name is a decision only a human makes, and
+  the message names the column and the three ways out of it. (#55, #7)
+- Report both in `brama anonymize check`, per environment and listed apart — the kept
+  columns a generator stands in for, and the ones that would stop a pull. `--env` narrows
+  the report to one destination, and a run with no `--env` covers every one. A run that
+  finds a column with no fallback is reported as `partial`. (#55, #7)
+- Name them in `--json` under `keep_substituted` and `keep_no_fallback`. Both keys are
+  always present, and an empty list means every kept column resolves to what the file
+  already says. (#55, #7)
 - Apply a preset's answer over your own where the preset is the stricter of the two, so
   a preset brama tightens in a later release protects a column in every project that
   names it — including the projects whose `brama.yaml` still says `keep`. (#54, #7)

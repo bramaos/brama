@@ -787,3 +787,182 @@ func TestCheckStillRefusesAnApprovalOfAFakedColumn(t *testing.T) {
 		t.Errorf("Detail = %q, want the approval of a dropped column refused", r.Detail)
 	}
 }
+
+// stranded is a classification whose one kept column no generator claims, so nothing can
+// stand in for it at a destination that has not approved it.
+const stranded = `anonymize:
+  tables:
+    orders:
+      columns:
+        internal_blob:
+          action: keep
+`
+
+// The whole of what `check` can say about a pull that does not exist yet: given this
+// file and these approvals, here is what each destination would actually receive.
+//
+// staging approves the column and local does not, so the same line of the file resolves
+// two ways — which is the model's point, and why the report names the environment.
+func TestCheckReportsWhatEachEnvironmentWouldReceive(t *testing.T) {
+	root := projectFile(t, consistent, map[string]string{"staging": "users.display_name"})
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want the resolution reported and not refused", err)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "local: users.display_name keep → fake.full_name") {
+		t.Errorf("output does not report the substitution at the unapproved destination:\n%s", printed)
+	}
+	if strings.Contains(printed, "staging: users.display_name") {
+		t.Errorf("output reports a substitution at the destination that approved the column:\n%s", printed)
+	}
+}
+
+// Approval is the only part of the model that differs between destinations, so it is the
+// only part `--env` narrows — and narrowing it means the report is about that one.
+func TestCheckNarrowsTheResolutionToTheNamedEnvironment(t *testing.T) {
+	root := projectFile(t, consistent, map[string]string{"staging": "users.display_name"})
+
+	env, out, _ := testEnv()
+	if err := runAnonymizeCheck(t.Context(), env, root, "local", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+	if !strings.Contains(out.String(), "local: users.display_name") {
+		t.Errorf("--env local does not report local's substitution:\n%s", out.String())
+	}
+
+	env, out, _ = testEnv()
+	if err := runAnonymizeCheck(t.Context(), env, root, "staging", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+	if strings.Contains(out.String(), "users.display_name") {
+		t.Errorf("--env staging reports a column staging approves:\n%s", out.String())
+	}
+}
+
+// A `keep` with no approval and no generator is the one case brama cannot derive its way
+// out of. It is reported rather than refused — the file does not contradict itself, and
+// what is being named is a pull that will refuse — and the run is partial, because there
+// is something left for a person to do.
+func TestCheckReportsAKeptColumnWithNothingToFallBackOn(t *testing.T) {
+	root := classifiedProject(t, stranded)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want it reported and not refused", err)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "local: orders.internal_blob") {
+		t.Errorf("output does not name the column with no fallback:\n%s", printed)
+	}
+	if !strings.Contains(printed, "refuses") {
+		t.Errorf("output does not say a pull to it refuses:\n%s", printed)
+	}
+}
+
+// The three exits, on the Refusal a pull raises. It is built here rather than reached
+// through the command, because the operation that raises it does not exist yet.
+func TestAKeepWithNoFallbackRefusesWithTheWaysOut(t *testing.T) {
+	root := classifiedProject(t, stranded)
+	cfg, _, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, _, _ := anonymize.Resolve(cfg)
+
+	stranded := anonymize.Effective(resolved, []string{"local"}).NoFallback()
+	r := anonymize.Refuse("local", stranded)
+
+	if r == nil {
+		t.Fatal("Refuse() = nil, want a refusal for a keep with no fallback")
+	}
+	if r.Reason != refusal.NoFallback {
+		t.Errorf("Reason = %q, want %q — exit 42 with a cause a caller can branch on", r.Reason, refusal.NoFallback)
+	}
+	if !strings.Contains(r.Detail, "orders.internal_blob") {
+		t.Errorf("Detail = %q, want the column named", r.Detail)
+	}
+}
+
+// The resolution is derived on every run. Nothing about a destination is written into a
+// file that is supposed to hold one answer per column.
+func TestCheckWritesNoResolutionIntoTheFile(t *testing.T) {
+	root := projectFile(t, consistent, map[string]string{"staging": "users.display_name"})
+	env, _, _ := testEnv()
+	path := filepath.Join(root, config.Filename)
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("check wrote the resolution back into brama.yaml, want it derived and never stored")
+	}
+}
+
+// Two keys, never one. A pull that substitutes runs and says so; a pull that has nothing
+// to substitute refuses. A caller gating a release on one key for both would act on the
+// wrong half of the answer.
+func TestCheckNamesSubstitutedAndStrandedColumnsSeparatelyInTheContract(t *testing.T) {
+	root := classifiedProject(t, `anonymize:
+  tables:
+    users:
+      columns:
+        display_name:
+          action: keep
+    orders:
+      columns:
+        internal_blob:
+          action: keep
+`)
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "local", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	substituted := []any{"local: users.display_name keep → fake.full_name"}
+	if !reflect.DeepEqual(payload["keep_substituted"], substituted) {
+		t.Errorf("keep_substituted = %v, want %v", payload["keep_substituted"], substituted)
+	}
+	if !reflect.DeepEqual(payload["keep_no_fallback"], []any{"local: orders.internal_blob"}) {
+		t.Errorf("keep_no_fallback = %v, want the stranded column named", payload["keep_no_fallback"])
+	}
+}
+
+// Both keys are always present. An empty list means every kept column resolves to what
+// the file already says; a missing key would mean the run did not look.
+func TestTheResolutionKeysAreEmptyListsAndNeverNull(t *testing.T) {
+	root := projectFile(t, consistent, map[string]string{
+		"local": "users.display_name", "staging": "users.display_name",
+	})
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	for _, key := range []string{"keep_substituted", "keep_no_fallback"} {
+		list, ok := payload[key].([]any)
+		if !ok || len(list) != 0 {
+			t.Errorf("%s = %v, want an empty list", key, payload[key])
+		}
+	}
+}
