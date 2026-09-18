@@ -240,7 +240,7 @@ func TestCoverCountsAPresetColumnAsClassified(t *testing.T) {
 	}, nil)
 	cfg.Anonymize.Preset = "wordpress"
 
-	resolved, _, problems := anonymize.Resolve(cfg)
+	resolved, _, problems := anonymize.Resolve(cfg, "wp_")
 	if len(problems) != 0 {
 		t.Fatalf("Resolve() = %v, want the shipped preset read in", problems)
 	}

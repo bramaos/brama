@@ -126,6 +126,15 @@ Approval: a Preset can say a column holds a public display name and still author
 Environment to receive it.
 _Avoid_: template, profile, defaults
 
+**Table prefix**:
+What a project's own tables are named with — WordPress spells it `$table_prefix`, and `wp_`
+is only its most common value. A Preset knows which tables a framework creates and not what
+this install calls them, so the prefix is read out of the project's own config by its
+Adapter, every time a Preset is resolved, and is never recorded in `brama.yaml`. One Brama
+cannot determine is a Refusal: a Preset applied under a guessed prefix classifies whatever
+table sorted into the accounts table's place.
+_Avoid_: namespace, schema, table name
+
 **Preset drift**:
 A column the Preset and the recorded Classification disagree about, once upgrading Brama
 has changed what the Preset says. The stricter of the two wins: a Preset moving a column

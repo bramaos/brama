@@ -279,7 +279,7 @@ func runAnonymizeReview(ctx context.Context, env *console, dir, only string, sou
 			"brama anonymize init")
 	}
 
-	read, err := inspect(ctx, cfg, environments, source)
+	read, err := inspect(ctx, cfg, filepath.Dir(path), environments, source)
 	if err != nil {
 		return err
 	}
@@ -387,11 +387,11 @@ func stillHeld(held preset.Drifts, decided *decisions) preset.Drifts {
 // the file does not carry, the first time the two disagree — and this is the output
 // somebody is about to commit.
 func replan(ctx context.Context, dir string, environments []string, source schemaSource) (anonymize.Review, inspection, error) {
-	cfg, _, err := config.Load(dir)
+	cfg, path, err := config.Load(dir)
 	if err != nil {
 		return anonymize.Review{}, inspection{}, err
 	}
-	read, err := inspect(ctx, cfg, environments, source)
+	read, err := inspect(ctx, cfg, filepath.Dir(path), environments, source)
 	if err != nil {
 		return anonymize.Review{}, inspection{}, err
 	}

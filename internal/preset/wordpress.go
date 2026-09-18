@@ -10,10 +10,17 @@ import (
 //
 // It covers the twelve tables a default single-site WordPress creates, and nothing
 // else: a plugin's tables are the project's own to classify, and guessing at them from
-// a name is the inference a Preset exists to replace. Table names carry the default
-// `wp_` prefix, which is what `$table_prefix` is unless somebody changed it — a project
-// on another prefix writes its own `tables` entries until brama reads the prefix out of
-// the Adapter's config.
+// a name is the inference a Preset exists to replace.
+//
+// Table names are written against the prefix rather than against `wp_`. `wp_` is only
+// the most common value of `$table_prefix` and not what it means — a hardened install is
+// on `acme_` — so the prefix is read out of the project's own config by the Adapter and
+// put in here. See Lookup.
+//
+// The prefix is the site's own. A multisite install carries a second, per-site prefix on
+// top of it, and those tables are the project's to classify: they are one site's copy of
+// tables this already answers for, and naming them from here would be guessing at how
+// many sites there are.
 //
 // Most of this is `keep`, and `keep` here is a statement about meaning and not a
 // permission: an Environment receives none of these as real values until a human
@@ -25,7 +32,7 @@ var wordpress = Preset{
 		// The accounts table. Everything identifying a person is fabricated, and the
 		// two columns holding the same login — WordPress derives `user_nicename` from
 		// `user_login` — are correlated so they still match afterwards.
-		"wp_users": columns(map[string]config.Column{
+		"{prefix}users": columns(map[string]config.Column{
 			"ID":            keep,
 			"user_login":    correlated("username", "wp_user"),
 			"user_nicename": correlated("username", "wp_user"),
@@ -46,7 +53,7 @@ var wordpress = Preset{
 		// classified per Discriminator value. The list is core's own keys: a key a
 		// plugin writes is Unclassified until the project says what it holds, which is
 		// the refusal working rather than a gap.
-		"wp_usermeta": {
+		"{prefix}usermeta": {
 			Discriminator: "meta_key",
 			Value:         "meta_value",
 			Keys: with(map[string]config.Column{
@@ -73,7 +80,7 @@ var wordpress = Preset{
 
 		// Comments are written by the public, so the author block is every kind of
 		// personal data a site collects without an account.
-		"wp_comments": columns(with(map[string]config.Column{
+		"{prefix}comments": columns(with(map[string]config.Column{
 			"comment_author":       fake("full_name"),
 			"comment_author_email": correlated("email", "wp_email"),
 			"comment_author_url":   fake("url"),
@@ -88,13 +95,13 @@ var wordpress = Preset{
 			"comment_content", "comment_karma", "comment_approved", "comment_type",
 			"comment_parent", "user_id",
 		))),
-		"wp_commentmeta": columns(keeps("meta_id", "comment_id", "meta_key", "meta_value")),
+		"{prefix}commentmeta": columns(keeps("meta_id", "comment_id", "meta_key", "meta_value")),
 
 		// Posts are the site's own content and travel whole. The exception is the
 		// per-post password, which a Generator would otherwise claim by pattern and
 		// fabricate a bcrypt hash into: WordPress stores that one in plain text and
 		// compares it as plain text, so a hash there is a post nobody can open.
-		"wp_posts": columns(with(map[string]config.Column{
+		"{prefix}posts": columns(with(map[string]config.Column{
 			"post_password": drop,
 		}, keeps(
 			"ID", "post_author", "post_date", "post_date_gmt", "post_content",
@@ -103,16 +110,16 @@ var wordpress = Preset{
 			"post_content_filtered", "post_parent", "guid", "menu_order", "post_type",
 			"post_mime_type", "comment_count",
 		))),
-		"wp_postmeta": columns(keeps("meta_id", "post_id", "meta_key", "meta_value")),
+		"{prefix}postmeta": columns(keeps("meta_id", "post_id", "meta_key", "meta_value")),
 
 		// Site configuration. `option_value` holds everything from the site title to a
 		// plugin's serialized settings, and a site whose options were fabricated does
 		// not boot.
-		"wp_options": columns(keeps("option_id", "option_name", "option_value", "autoload")),
+		"{prefix}options": columns(keeps("option_id", "option_name", "option_value", "autoload")),
 
 		// The blogroll. `link_url` matches a Generator pattern and is not a person's
 		// URL: these are links the site's own editors wrote.
-		"wp_links": columns(keeps(
+		"{prefix}links": columns(keeps(
 			"link_id", "link_url", "link_name", "link_image", "link_target",
 			"link_description", "link_visible", "link_owner", "link_rating",
 			"link_updated", "link_rel", "link_notes", "link_rss",
@@ -120,10 +127,10 @@ var wordpress = Preset{
 
 		// Taxonomy. Categories and tags are site structure, and fabricating them
 		// detaches every post from the terms it is filed under.
-		"wp_terms":              columns(keeps("term_id", "name", "slug", "term_group")),
-		"wp_termmeta":           columns(keeps("meta_id", "term_id", "meta_key", "meta_value")),
-		"wp_term_taxonomy":      columns(keeps("term_taxonomy_id", "term_id", "taxonomy", "description", "parent", "count")),
-		"wp_term_relationships": columns(keeps("object_id", "term_taxonomy_id", "term_order")),
+		"{prefix}terms":              columns(keeps("term_id", "name", "slug", "term_group")),
+		"{prefix}termmeta":           columns(keeps("meta_id", "term_id", "meta_key", "meta_value")),
+		"{prefix}term_taxonomy":      columns(keeps("term_taxonomy_id", "term_id", "taxonomy", "description", "parent", "count")),
+		"{prefix}term_relationships": columns(keeps("object_id", "term_taxonomy_id", "term_order")),
 	},
 }
 

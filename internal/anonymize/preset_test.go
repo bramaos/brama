@@ -12,7 +12,7 @@ import (
 // these tests are about what the merge produced, not about it having happened.
 func resolved(t *testing.T, cfg *config.Config) *config.Anonymize {
 	t.Helper()
-	out, _, problems := anonymize.Resolve(cfg)
+	out, _, problems := anonymize.Resolve(cfg, "wp_")
 	if len(problems) > 0 {
 		t.Fatalf("Resolve() = %v problems, want the preset read in", problems)
 	}
@@ -47,7 +47,7 @@ func TestResolveReadsInTheClassificationThePresetShips(t *testing.T) {
 func TestResolveDoesNotWriteThePresetBackIntoTheFile(t *testing.T) {
 	cfg := withPreset("wordpress", nil)
 
-	if _, _, problems := anonymize.Resolve(cfg); len(problems) > 0 {
+	if _, _, problems := anonymize.Resolve(cfg, "wp_"); len(problems) > 0 {
 		t.Fatalf("Resolve() = %v", problems)
 	}
 
@@ -74,7 +74,7 @@ func TestResolveKeepsTheProjectsOwnTables(t *testing.T) {
 // A typo in a preset name resolves to nothing, and nothing is every column the preset
 // was carrying. It is refused by name, with the ones brama does ship listed.
 func TestResolveRefusesAPresetBramaDoesNotShip(t *testing.T) {
-	_, _, problems := anonymize.Resolve(withPreset("wordpres", nil))
+	_, _, problems := anonymize.Resolve(withPreset("wordpres", nil), "wp_")
 
 	problem := only(t, problems)
 	if problem.At != "anonymize.preset" {
@@ -91,7 +91,7 @@ func TestResolveLeavesAFileWithNoPresetAlone(t *testing.T) {
 		"users": columns(map[string]config.Column{"email": {Action: "fake.email"}}),
 	}, nil)
 
-	out, _, problems := anonymize.Resolve(cfg)
+	out, _, problems := anonymize.Resolve(cfg, "wp_")
 
 	if len(problems) != 0 || out != cfg {
 		t.Errorf("Resolve() = %v, %v, want the config through untouched", out, problems)
@@ -108,7 +108,7 @@ func TestResolveGrantsNoApprovalForAPresetsKeep(t *testing.T) {
 		"local":   {Anonymize: &config.EnvironmentAnonymize{}},
 	}
 
-	out, _, problems := anonymize.Resolve(cfg)
+	out, _, problems := anonymize.Resolve(cfg, "wp_")
 	if len(problems) > 0 {
 		t.Fatalf("Resolve() = %v", problems)
 	}

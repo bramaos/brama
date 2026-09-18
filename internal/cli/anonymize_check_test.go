@@ -61,7 +61,22 @@ environments:
 	if err := os.WriteFile(filepath.Join(root, config.Filename), []byte(body), config.FileMode); err != nil {
 		t.Fatal(err)
 	}
+	// The project's own config, because the preset is named after the prefix this
+	// declares. `wp_` is what the installer writes, and it is what the tables below are
+	// spelled with; a project on another prefix is prefixedProject.
+	wpConfig(t, root, "wp_")
 	return root
+}
+
+// wpConfig writes the one line of wp-config.php brama reads: what this install's tables
+// are prefixed with. A project without it is a project whose preset cannot be named, and
+// `check` refuses rather than assuming wp_.
+func wpConfig(t *testing.T, root, prefix string) {
+	t.Helper()
+	body := "<?php\n$table_prefix = '" + prefix + "';\n"
+	if err := os.WriteFile(filepath.Join(root, "wp-config.php"), []byte(body), config.FileMode); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // consistent is a classification with nothing wrong with it.
@@ -133,8 +148,10 @@ func TestCheckWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 {
-		t.Errorf("the project holds %d files, want only brama.yaml", len(entries))
+	// brama.yaml and the wp-config.php the prefix was read out of, and nothing check
+	// left behind beside them.
+	if len(entries) != 2 {
+		t.Errorf("the project holds %d files, want brama.yaml and wp-config.php alone", len(entries))
 	}
 }
 
@@ -869,7 +886,7 @@ func TestAKeepWithNoFallbackRefusesWithTheWaysOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, _, _ := anonymize.Resolve(cfg)
+	resolved, _, _ := anonymize.Resolve(cfg, "wp_")
 
 	stranded := anonymize.Effective(resolved, []string{"local"}).NoFallback()
 	r := anonymize.Refuse("local", stranded)

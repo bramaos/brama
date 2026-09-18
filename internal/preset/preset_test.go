@@ -1,6 +1,8 @@
 package preset_test
 
 import (
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,13 +12,18 @@ import (
 	"github.com/bramaos/brama/internal/preset"
 )
 
+// prefix is a project's own table prefix, which every lookup needs before a preset can
+// name anything. `wp_` is what the WordPress installer writes, so the tests below read
+// as the tables everybody knows — the ones that say prefixing works pass another.
+const prefix = "wp_"
+
 // every is the set brama ships, by name, so a preset added later is checked by
 // everything below without anyone remembering to add it.
 func every(t *testing.T) []preset.Preset {
 	t.Helper()
 	out := make([]preset.Preset, 0, len(preset.Names()))
 	for _, name := range preset.Names() {
-		p, err := preset.Lookup(name)
+		p, err := preset.Lookup(name, prefix)
 		if err != nil {
 			t.Fatalf("Lookup(%q): %v", name, err)
 		}
@@ -35,7 +42,7 @@ func TestEveryShippedPresetHoldsTogether(t *testing.T) {
 			App:       config.App{Adapter: p.Name},
 			Anonymize: mustApply(t, p.Name),
 		}
-		if _, problems := anonymize.Check(cfg, nil, nil); len(problems) > 0 {
+		if _, problems := anonymize.Check(cfg, nil, nil, nil); len(problems) > 0 {
 			t.Errorf("the %s preset does not hold together: %v", p.Name, problems)
 		}
 	}
@@ -75,11 +82,12 @@ func assertAction(t *testing.T, preset, at string, col config.Column) {
 // the only thing `anonymize init` has to read to find one.
 func TestEveryShippedPresetIsFoundByItsAdapterName(t *testing.T) {
 	for _, p := range every(t) {
-		if found, ok := preset.For(p.Name); !ok || found.Name != p.Name {
-			t.Errorf("For(%q) = %v, %v, want the preset of that adapter", p.Name, found.Name, ok)
+		found, ships, err := preset.For(p.Name, prefix)
+		if !ships || err != nil || found.Name != p.Name {
+			t.Errorf("For(%q) = %v, %v, %v, want the preset of that adapter", p.Name, found.Name, ships, err)
 		}
 	}
-	if _, ok := preset.For("symfony"); ok {
+	if _, ships, _ := preset.For("symfony", prefix); ships {
 		t.Error("For(symfony) found a preset brama does not ship")
 	}
 }
@@ -88,13 +96,49 @@ func TestEveryShippedPresetIsFoundByItsAdapterName(t *testing.T) {
 // leave every column the preset was carrying unclassified, which reads as a project
 // that decided nothing rather than as a typo.
 func TestLookupRefusesANameBramaDoesNotShip(t *testing.T) {
-	_, err := preset.Lookup("wordpres")
+	_, err := preset.Lookup("wordpres", prefix)
 
 	if err == nil {
 		t.Fatal("Lookup(wordpres) = nil, want a refusal")
 	}
 	if !strings.Contains(err.Error(), "wordpress") {
 		t.Errorf("error = %q, want the presets brama does ship listed", err)
+	}
+}
+
+// The prefix is half of every table's name, and it is the project's half. A preset that
+// only matched `wp_` would match nothing at all on a hardened install — silently, and in
+// a way that reads as "brama recognised nothing" rather than as a prefix that differs.
+func TestLookupNamesTheTablesForThisProjectsPrefix(t *testing.T) {
+	p, err := preset.Lookup("wordpress", "acme_")
+	if err != nil {
+		t.Fatalf("Lookup(wordpress, acme_): %v", err)
+	}
+
+	if _, known := p.Tables["acme_users"]; !known {
+		t.Errorf("tables = %v, want the accounts table named acme_users", slices.Sorted(maps.Keys(p.Tables)))
+	}
+	if _, stale := p.Tables["wp_users"]; stale {
+		t.Error("wp_users survived a project whose prefix is acme_ — a table this database does not have")
+	}
+	if got := p.Tables["acme_users"].Columns["user_email"].Action; got != "fake.email" {
+		t.Errorf("acme_users.user_email = %q, want the classification carried over with the name", got)
+	}
+}
+
+// The placeholder is never a table name. A preset resolved without a prefix would
+// classify `{prefix}users`, which matches nothing and says nothing about why.
+func TestLookupRefusesAPresetItCannotName(t *testing.T) {
+	_, err := preset.Lookup("wordpress", "")
+
+	if err == nil {
+		t.Fatal("Lookup(wordpress, \"\") = nil, want a refusal rather than a preset named after nothing")
+	}
+	if !preset.NeedsPrefix("wordpress") {
+		t.Error("NeedsPrefix(wordpress) = false, want the preset to say it is waiting on a prefix")
+	}
+	if preset.NeedsPrefix("symfony") {
+		t.Error("NeedsPrefix(symfony) = true for a preset brama does not ship")
 	}
 }
 
@@ -175,7 +219,7 @@ func TestTheWordPressPresetCoversTheCoreTables(t *testing.T) {
 // are about what it says, not about it being found.
 func mustLookup(t *testing.T, name string) preset.Preset {
 	t.Helper()
-	p, err := preset.Lookup(name)
+	p, err := preset.Lookup(name, prefix)
 	if err != nil {
 		t.Fatalf("Lookup(%q): %v", name, err)
 	}

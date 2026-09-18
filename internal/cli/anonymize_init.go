@@ -159,15 +159,6 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 			"which changes decisions one at a time instead of replacing them all", filepath.Base(path))
 	}
 
-	read, from, err := readSchema(ctx, cfg, environments, source)
-	if err != nil {
-		return err
-	}
-	if from == "" {
-		return fmt.Errorf("no environment is reachable — init classifies the columns a database has, "+
-			"and %s could not read one from %s", filepath.Base(path), join(environments))
-	}
-
 	// The Preset brama ships for this project's Adapter, if it ships one. It is the
 	// Classification this project starts from, and it is referenced by name rather than
 	// copied into the file: what it covers is decided already, and what it does not is
@@ -177,15 +168,42 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	//
 	// named is the one signal for whether there is a Preset: empty is "brama ships none
 	// for this adapter", and it is the same empty string the block is written from.
+	//
+	// Settled before a database is reached, like everything else here that a file can
+	// answer on its own. A Preset names its tables after the project's own prefix, so one
+	// resolved without it would cover twelve tables this database does not have — and
+	// `check`, resolving the same file later, would count them. A prefix brama cannot
+	// read is a Refusal rather than a fallback to the framework's default, and refusing it
+	// here costs nobody a connection to production. The Preset the Adapter ships is the
+	// Adapter's own name twice, which is the naming ADR 0011 relies on.
 	var (
 		named string
 		start *config.Anonymize
 	)
-	if shipped, covers := preset.For(cfg.App.Adapter); covers {
+	prefix := ""
+	if preset.NeedsPrefix(cfg.App.Adapter) {
+		if prefix, err = tablePrefix(cfg, filepath.Dir(path), cfg.App.Adapter); err != nil {
+			return err
+		}
+	}
+	shipped, ships, err := preset.For(cfg.App.Adapter, prefix)
+	if err != nil {
+		return err
+	}
+	if ships {
 		// No Drift to collect: init runs on a file with no anonymize block, so there is
 		// no recorded Classification for the Preset to disagree with.
 		start, _ = shipped.Apply(nil)
 		named = shipped.Name
+	}
+
+	read, from, err := readSchema(ctx, cfg, environments, source)
+	if err != nil {
+		return err
+	}
+	if from == "" {
+		return fmt.Errorf("no environment is reachable — init classifies the columns a database has, "+
+			"and %s could not read one from %s", filepath.Base(path), join(environments))
 	}
 
 	// Cover against that start is the part of the schema still undecided, which is

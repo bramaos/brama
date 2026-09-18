@@ -11,6 +11,15 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Match the `wordpress` preset against your project's own `$table_prefix`, so an install
+  on `acme_` gets the preset an install on `wp_` always got. The prefix is read out of
+  the project's own config — `wp-config.php`, or `.env` and `config/application.php` on
+  Bedrock — every time the preset is resolved, and is never declared in `brama.yaml`,
+  where it would be a second copy of the truth and the one nobody updates. (#58, #7)
+- Refuse a prefix brama cannot read, naming the files it looked in and the preset waiting
+  on the answer. It never falls back to `wp_`: a preset applied under a guessed prefix
+  does not classify nothing — it classifies whatever table sorted into the accounts
+  table's place. (#58, #7)
 - Answer the pending half in a terminal. `brama anonymize review` now puts what only you
   can decide as a checklist — one per destination environment, one line per column — and
   the question it asks is "do you approve exposing this column as real data?" rather than
@@ -225,6 +234,10 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Fixed
 
+- Stop `brama anonymize check` counting a preset table the database does not have. Where
+  a schema was read, the counts are of the tables that schema has, so a project the
+  preset half-fits no longer reads as one with twelve tables classified. With no schema
+  in reach nothing narrows the count, because nothing knows what is there. (#58)
 - Report a failed write instead of finishing successfully, so a closed pipe or a full
   disk is no longer silent.
 

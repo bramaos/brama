@@ -67,7 +67,14 @@ type Summary struct {
 // Classification an upgrade substituted for the recorded one is not something the project
 // wrote, and an Approval left standing beside it is not a contradiction the project can
 // be asked to fix. See checkApprovals.
-func Check(cfg *config.Config, environments []string, drift preset.Drifts) (Summary, []Problem) {
+//
+// present is the tables the Schema actually has, and nil where no Schema was in reach.
+// It narrows the Summary and nothing else: a Preset classifies the twelve tables its
+// framework creates, and counting the ones this database does not have would report
+// twelve tables classified on a project that has three. Problems are found against the
+// whole file either way — a contradiction in a table nobody has is still a
+// contradiction, and it is one somebody wrote down.
+func Check(cfg *config.Config, environments []string, drift preset.Drifts, present []string) (Summary, []Problem) {
 	var problems []Problem
 	add := func(at, detail string) {
 		problems = append(problems, Problem{At: at, Detail: detail})
@@ -130,7 +137,7 @@ func Check(cfg *config.Config, environments []string, drift preset.Drifts) (Summ
 	}
 
 	problems = append(problems, checkApprovals(cfg, environments, drift)...)
-	return summarize(cfg.Anonymize, groups), problems
+	return summarize(cfg.Anonymize, present), problems
 }
 
 // checkApprovals reports Approvals that cannot mean what they say.
@@ -254,11 +261,47 @@ func discriminated(a *config.Anonymize, ref config.ColumnRef) bool {
 	return table.Discriminator == ref.Column || (table.Value != "" && table.Value == ref.Column)
 }
 
-func summarize(a *config.Anonymize, groups map[string][]string) Summary {
+// summarize counts what the file classifies, over the tables a Schema says are there.
+//
+// present nil is "no Schema was read", and everything counts — a run that could not
+// reach a database has nothing to say about which tables exist, and silently counting
+// none of them would report a file that classifies nothing.
+//
+// The Correlation groups are counted here rather than taken from the map Check built,
+// because that map is every group the file names and this is a count of the ones the
+// database has a table for. The two answer different questions on the same entries.
+func summarize(a *config.Anonymize, present []string) Summary {
 	if a == nil {
 		return Summary{}
 	}
-	return Summary{Tables: len(a.Tables), Columns: len(entries(a)), Groups: len(groups)}
+
+	has := func(string) bool { return true }
+	if present != nil {
+		known := make(map[string]bool, len(present))
+		for _, table := range present {
+			known[table] = true
+		}
+		has = func(table string) bool { return known[table] }
+	}
+
+	var summary Summary
+	groups := map[string]bool{}
+	for table := range a.Tables {
+		if has(table) {
+			summary.Tables++
+		}
+	}
+	for _, e := range entries(a) {
+		if !has(e.table) {
+			continue
+		}
+		summary.Columns++
+		if e.column.Correlate != "" {
+			groups[e.column.Correlate] = true
+		}
+	}
+	summary.Groups = len(groups)
+	return summary
 }
 
 // nearest returns the group a lone member was most likely meant to join.

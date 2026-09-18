@@ -6,8 +6,14 @@
 // project without anyone editing anything.
 // See docs/adr/0011-the-stricter-of-preset-and-record-wins.md.
 //
-// A Preset supplies knowledge and never authorization. It can say that
-// `wp_users.display_name` holds a public-facing name and still authorize no Environment
+// A Preset names its tables after the project's own table prefix, which its Adapter reads
+// out of the project's config: `wp_` is what the WordPress installer writes and not what
+// `$table_prefix` means, and a Preset matched against the wrong prefix would classify
+// whatever table sorted into place. See Lookup, and
+// docs/adr/0014-a-preset-is-named-for-the-projects-table-prefix.md.
+//
+// A Preset supplies knowledge and never authorization. It can say that the users table's
+// `display_name` holds a public-facing name and still authorize no Environment
 // to receive it: a Preset's `keep` is not pre-approved by virtue of being omitted from
 // the file, because Presets are omitted for being reusable knowledge and not for being
 // trusted. Approval lives on the Environment, and only a human grants one.
@@ -46,28 +52,96 @@ type Preset struct {
 // would be a closed set written down and then left unenforced.
 var presets = []Preset{wordpress}
 
-// Lookup returns the Preset shipped under this name.
+// prefixMark is what a Preset writes where the project's own table prefix goes.
+//
+// A Preset knows which tables a framework creates and what is in them; it does not know
+// what they are called, because the name is half the framework's and half the project's.
+// WordPress spells the project's half `$table_prefix`, and `wp_` is only its most common
+// value. See Lookup.
+const prefixMark = "{prefix}"
+
+// Lookup returns the Preset shipped under this name, named for this project.
+//
+// prefix is what the project's own tables are prefixed with, read out of the project's
+// config by its Adapter. It is required of every caller rather than defaulted here: a
+// Preset applied under the wrong prefix does not classify nothing — it classifies
+// whatever table sorted into the accounts table's place, which is worse than matching
+// nothing at all.
 //
 // An unknown name is an error and never an empty Preset. `preset: wordpres` resolving
 // to nothing would leave every column the Preset was carrying Unclassified, which reads
 // in the output as a project that classified nothing rather than as a typo.
-func Lookup(name string) (Preset, error) {
-	for _, p := range presets {
-		if p.Name == name {
-			return Preset{Name: p.Name, Tables: clone(p.Tables)}, nil
-		}
+func Lookup(name, prefix string) (Preset, error) {
+	p, ships := shipped(name)
+	if !ships {
+		return Preset{}, fmt.Errorf("no preset named %q — brama ships: %s", name, strings.Join(Names(), ", "))
 	}
-	return Preset{}, fmt.Errorf("no preset named %q — brama ships: %s", name, strings.Join(Names(), ", "))
+	return p.named(prefix)
 }
 
-// For returns the Preset brama ships for an Adapter, and whether it ships one.
+// For returns the Preset brama ships for an Adapter, whether it ships one, and whether
+// the prefix given could name its tables.
 //
 // This is `anonymize init`'s question rather than `check`'s: the file being
 // bootstrapped names no Preset yet, and what decides whether it gets one is which
 // framework the project already declared.
-func For(adapter string) (Preset, bool) {
-	p, err := Lookup(adapter)
-	return p, err == nil
+//
+// The two negative answers are separate because they mean opposite things to the caller.
+// No Preset is an ordinary run — init classifies from the Generators alone. A Preset
+// that cannot be named is a run that must stop, because carrying on would write a file
+// whose preset line covers tables this database does not have.
+func For(adapter, prefix string) (Preset, bool, error) {
+	p, ships := shipped(adapter)
+	if !ships {
+		return Preset{}, false, nil
+	}
+	named, err := p.named(prefix)
+	return named, true, err
+}
+
+// NeedsPrefix reports whether the Preset shipped under this name is written against a
+// prefix the project decides, and so cannot be resolved until one is read.
+//
+// It is asked before Lookup, by the caller that has to go and find the prefix, so that a
+// project whose Preset names its tables outright is never sent looking through config
+// files for an answer nothing needs.
+func NeedsPrefix(name string) bool {
+	p, ships := shipped(name)
+	return ships && p.needsPrefix()
+}
+
+// shipped is the one scan of the set brama ships. Every way in asks it the same
+// question, so a Preset cannot be found by one caller and missed by another.
+func shipped(name string) (Preset, bool) {
+	for _, p := range presets {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Preset{}, false
+}
+
+func (p Preset) needsPrefix() bool {
+	for name := range p.Tables {
+		if strings.Contains(name, prefixMark) {
+			return true
+		}
+	}
+	return false
+}
+
+// named resolves the prefixMark in every table name against this project's prefix.
+func (p Preset) named(prefix string) (Preset, error) {
+	if prefix == "" && p.needsPrefix() {
+		return Preset{}, fmt.Errorf("the %s preset is written against this project's table prefix, "+
+			"and none was determined", p.Name)
+	}
+
+	out := Preset{Name: p.Name, Tables: make(map[string]config.Table, len(p.Tables))}
+	for name, t := range clone(p.Tables) {
+		out.Tables[strings.ReplaceAll(name, prefixMark, prefix)] = t
+	}
+	return out, nil
 }
 
 // Names lists the Presets brama ships, sorted, for help text and error messages.

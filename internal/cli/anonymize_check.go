@@ -401,7 +401,7 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 			"brama anonymize init")
 	}
 
-	read, err := inspect(ctx, cfg, environments, source)
+	read, err := inspect(ctx, cfg, filepath.Dir(path), environments, source)
 	if err != nil {
 		return err
 	}
@@ -476,19 +476,42 @@ type inspection struct {
 // on without them would call every column it was holding unclassified and refuse every
 // approval of one — a hundred lines of consequence stacked on top of the one typo that
 // caused them.
-func inspect(ctx context.Context, cfg *config.Config, environments []string, source schemaSource) (inspection, error) {
-	resolved, drift, unresolved := anonymize.Resolve(cfg)
+//
+// root is the directory the project's own config lives in — the one brama.yaml was
+// found beside. A Preset is written against the project's table prefix rather than
+// against the framework's default, and the prefix is read from there every time rather
+// than recorded in brama.yaml, so that the tables a Preset covers are the tables the
+// install actually has. A prefix the Adapter cannot determine is a Refusal, not a guess.
+func inspect(ctx context.Context, cfg *config.Config, root string, environments []string, source schemaSource) (inspection, error) {
+	prefix, err := presetPrefix(cfg, root)
+	if err != nil {
+		return inspection{}, err
+	}
+
+	resolved, drift, unresolved := anonymize.Resolve(cfg, prefix)
 	if len(unresolved) > 0 {
 		return inspection{Resolved: resolved, Problems: unresolved}, nil
 	}
 
 	out := inspection{Resolved: resolved, Drift: drift}
-	out.Summary, out.Problems = anonymize.Check(resolved, environments, drift)
 
+	// The Schema is read before the file is counted rather than after it. What a Preset
+	// covers is the tables this database has, and a count taken without that is the
+	// headline overstating itself on every project the Preset half-fits.
 	read, from, err := readSchema(ctx, cfg, environments, source)
 	if err != nil {
 		return inspection{}, err
 	}
+
+	var present []string
+	if from != "" {
+		present = make([]string, 0, len(read.Tables))
+		for _, t := range read.Tables {
+			present = append(present, t.Name)
+		}
+	}
+	out.Summary, out.Problems = anonymize.Check(resolved, environments, drift, present)
+
 	if from != "" {
 		coverage, uncoverable := anonymize.Cover(resolved.Anonymize, read)
 		out.SchemaFrom, out.Coverage = from, &coverage

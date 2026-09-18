@@ -26,6 +26,12 @@ const (
 	// half that is a decision. It exits 42 like every other Refusal, which is what
 	// makes a CI job fail on it without reading prose.
 	ReviewRequired Reason = "review_required"
+	// UnknownPrefix is a project whose table prefix brama could not read out of its own
+	// config, on a project whose Preset is written against one. Nothing is wrong with
+	// the classification — brama cannot tell which tables it is about, and a Preset
+	// applied under a guessed prefix would classify whatever table sorted into the
+	// accounts table's place. See ADR 0013 on resemblance-matching.
+	UnknownPrefix Reason = "unknown_prefix"
 	// NoFallback is a `keep` column the destination has not approved and no Generator
 	// claims, so there is nothing to send it as. Brama may reduce exposure by
 	// derivation — it may not invent destructive policy by emptying a column nobody

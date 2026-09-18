@@ -34,7 +34,7 @@ func names(cfg *config.Config) []string {
 // problemsOf is Check's second return, for the tests that only have something to say
 // about what it refused.
 func problemsOf(cfg *config.Config, environments []string) []anonymize.Problem {
-	_, problems := anonymize.Check(cfg, environments, nil)
+	_, problems := anonymize.Check(cfg, environments, nil, nil)
 	return problems
 }
 
@@ -64,7 +64,7 @@ func TestCheckPassesAConsistentClassification(t *testing.T) {
 		}},
 	})
 
-	summary, problems := anonymize.Check(cfg, names(cfg), nil)
+	summary, problems := anonymize.Check(cfg, names(cfg), nil, nil)
 
 	if len(problems) != 0 {
 		t.Fatalf("Check() = %v, want no problems", problems)
@@ -104,7 +104,7 @@ func TestCheckAcceptsEveryGeneratorBramaShips(t *testing.T) {
 				"users": columns(map[string]config.Column{"col": {Action: action}}),
 			}, nil)
 
-			if _, problems := anonymize.Check(cfg, nil, nil); len(problems) != 0 {
+			if _, problems := anonymize.Check(cfg, nil, nil, nil); len(problems) != 0 {
 				t.Errorf("Check() = %v, want %s accepted", problems, action)
 			}
 		})
@@ -196,7 +196,7 @@ func TestCheckSuggestsNothingWhenNoGroupIsClose(t *testing.T) {
 		}),
 	}, nil)
 
-	_, problems := anonymize.Check(cfg, nil, nil)
+	_, problems := anonymize.Check(cfg, nil, nil, nil)
 
 	if len(problems) != 2 {
 		t.Fatalf("got %d problems, want one per lone group: %v", len(problems), problems)
@@ -224,7 +224,7 @@ func TestCheckCountsDiscriminatedKeysAsGroupMembers(t *testing.T) {
 		},
 	}, nil)
 
-	if _, problems := anonymize.Check(cfg, nil, nil); len(problems) != 0 {
+	if _, problems := anonymize.Check(cfg, nil, nil, nil); len(problems) != 0 {
 		t.Errorf("Check() = %v, want a key and a column to correlate with each other", problems)
 	}
 }
@@ -276,11 +276,11 @@ func TestCheckAcceptsAnApprovalOfAColumnOnlyThePresetClassifies(t *testing.T) {
 	})
 	cfg.Anonymize.Preset = "wordpress"
 
-	resolved, _, problems := anonymize.Resolve(cfg)
+	resolved, _, problems := anonymize.Resolve(cfg, "wp_")
 	if len(problems) != 0 {
 		t.Fatalf("Resolve() = %v, want the shipped preset read in", problems)
 	}
-	if _, problems := anonymize.Check(resolved, names(resolved), nil); len(problems) != 0 {
+	if _, problems := anonymize.Check(resolved, names(resolved), nil, nil); len(problems) != 0 {
 		t.Errorf("Check() = %v, want an approval of a preset-kept column accepted", problems)
 	}
 }
@@ -297,7 +297,7 @@ func TestCheckStillRefusesAnApprovalNoPresetClassifies(t *testing.T) {
 	})
 	cfg.Anonymize.Preset = "wordpress"
 
-	resolved, _, _ := anonymize.Resolve(cfg)
+	resolved, _, _ := anonymize.Resolve(cfg, "wp_")
 	problem := only(t, problemsOf(resolved, names(resolved)))
 
 	if !strings.Contains(problem.Detail, "plugin_leads.internal_note") {
@@ -343,10 +343,10 @@ func TestCheckNarrowsToTheEnvironmentsItIsGiven(t *testing.T) {
 		"local":   approves("users", "email"),
 	})
 
-	if _, problems := anonymize.Check(cfg, []string{"staging"}, nil); len(problems) != 0 {
+	if _, problems := anonymize.Check(cfg, []string{"staging"}, nil, nil); len(problems) != 0 {
 		t.Errorf("Check(staging) = %v, want only staging's approvals read", problems)
 	}
-	if _, problems := anonymize.Check(cfg, []string{"staging", "local"}, nil); len(problems) != 1 {
+	if _, problems := anonymize.Check(cfg, []string{"staging", "local"}, nil, nil); len(problems) != 1 {
 		t.Errorf("Check(all) = %v, want local's approval reported", problems)
 	}
 }

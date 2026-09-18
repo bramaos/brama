@@ -25,15 +25,22 @@ import (
 // left exactly as it was found. A Preset tightening is applied here and written back
 // nowhere; `brama anonymize review` is the one command that edits brama.yaml.
 //
+// prefix is what this project's own tables are named with, which the caller read out of
+// the project's config through its Adapter. A Preset knows which tables a framework
+// creates and not what this install calls them, so it is named here or it is not
+// resolved at all — resolving one against the wrong prefix would hand every downstream
+// caller a classification for tables that do not exist, and leave the ones that do
+// unclassified.
+//
 // An unknown name is a Problem rather than an error, so one run reports it beside
 // everything else wrong with the file, and the rest of the check still runs against
 // what the file does say.
-func Resolve(cfg *config.Config) (*config.Config, preset.Drifts, []Problem) {
+func Resolve(cfg *config.Config, prefix string) (*config.Config, preset.Drifts, []Problem) {
 	if cfg.Anonymize == nil || cfg.Anonymize.Preset == "" {
 		return cfg, nil, nil
 	}
 
-	p, err := preset.Lookup(cfg.Anonymize.Preset)
+	p, err := preset.Lookup(cfg.Anonymize.Preset, prefix)
 	if err != nil {
 		return cfg, nil, []Problem{{At: "anonymize.preset", Detail: err.Error()}}
 	}
