@@ -185,7 +185,10 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 		start *config.Anonymize
 	)
 	if shipped, covers := preset.For(cfg.App.Adapter); covers {
-		named, start = shipped.Name, shipped.Apply(nil)
+		// No Drift to collect: init runs on a file with no anonymize block, so there is
+		// no recorded Classification for the Preset to disagree with.
+		start, _ = shipped.Apply(nil)
+		named = shipped.Name
 	}
 
 	// Cover against that start is the part of the schema still undecided, which is

@@ -81,34 +81,47 @@ func Names() []string {
 }
 
 // Apply returns the Classification a file means once this Preset is read in: the
-// Preset's answers, overridden column by column by whatever the file itself says.
+// Preset's answers, overridden column by column by whatever the file itself says — and
+// every column where the two disagree about exposure, which is the Drift.
 //
 // The override is per column and not per table. A project that wants real values in
 // `wp_users.display_name` writes that one column, and does not thereby take
 // responsibility for every other column of `wp_users` — which is the whole reason the
 // Preset is referenced rather than expanded.
 //
+// What the file cannot do by writing a column is loosen the Preset. Where the two
+// disagree the stricter answer wins, so a Preset moving a column off `keep` applies here
+// and a Preset moving one onto `keep` is reported and not applied. See Drift.
+//
 // Nothing here writes back. The merge is what brama acts on; brama.yaml still holds
 // only the project's own half, and the file is not touched by having been read.
 //
-// a may be nil, which is the state `anonymize init` runs in: the Preset on its own.
-func (p Preset) Apply(a *config.Anonymize) *config.Anonymize {
+// a may be nil, which is the state `anonymize init` runs in: the Preset on its own, and
+// no record to drift from.
+func (p Preset) Apply(a *config.Anonymize) (*config.Anonymize, Drifts) {
 	out := &config.Anonymize{Preset: p.Name, Tables: clone(p.Tables)}
 	if a == nil {
-		return out
+		return out, nil
 	}
+
+	// Sorted, here and below, so that two runs over one file report the same Drift in
+	// the same order.
+	var drift Drifts
 	for _, name := range slices.Sorted(maps.Keys(a.Tables)) {
 		over := a.Tables[name]
 		shipped, known := out.Tables[name]
 		if !known {
 			// A table the Preset says nothing about is the project's alone — a plugin's
-			// table, or one the application added. It carries over as written.
+			// table, or one the application added. It carries over as written, and a
+			// table the Preset never classified cannot have drifted from it.
 			out.Tables[name] = over
 			continue
 		}
-		out.Tables[name] = override(shipped, over)
+		merged, drifted := override(name, shipped, over)
+		out.Tables[name] = merged
+		drift = append(drift, drifted...)
 	}
-	return out
+	return out, drift
 }
 
 // override merges one table's project answers over the Preset's.
@@ -116,28 +129,53 @@ func (p Preset) Apply(a *config.Anonymize) *config.Anonymize {
 // An empty field in the file is not an answer. Writing one column of a discriminated
 // table must not silently unset the Discriminator the Preset named, because a table
 // that names keys and no Discriminator classifies nothing at all.
-func override(shipped, over config.Table) config.Table {
+func override(table string, shipped, over config.Table) (config.Table, Drifts) {
 	if over.Discriminator != "" {
 		shipped.Discriminator = over.Discriminator
 	}
 	if over.Value != "" {
 		shipped.Value = over.Value
 	}
-	shipped.Keys = mergeColumns(shipped.Keys, over.Keys)
-	shipped.Columns = mergeColumns(shipped.Columns, over.Columns)
-	return shipped
+
+	keys, keyDrift := mergeColumns(shipped.Keys, over.Keys, func(key string) string {
+		return table + "." + shipped.Discriminator + "=" + key
+	})
+	columns, columnDrift := mergeColumns(shipped.Columns, over.Columns, func(column string) string {
+		return table + "." + column
+	})
+	shipped.Keys, shipped.Columns = keys, columns
+	return shipped, append(keyDrift, columnDrift...)
 }
 
-func mergeColumns(shipped, over map[string]config.Column) map[string]config.Column {
+// mergeColumns merges one map of project answers over the Preset's. name says what to
+// call one of them in a sentence, which is the one thing a Drift out of here carries and
+// the one thing that differs between a table's keys and its ordinary columns.
+func mergeColumns(shipped, over map[string]config.Column, name func(string) string) (map[string]config.Column, Drifts) {
 	if len(over) == 0 {
-		return shipped
+		return shipped, nil
 	}
 	out := maps.Clone(shipped)
 	if out == nil {
 		out = make(map[string]config.Column, len(over))
 	}
-	maps.Copy(out, over)
-	return out
+
+	var drift Drifts
+	for _, column := range slices.Sorted(maps.Keys(over)) {
+		recorded := over[column]
+		ships, known := shipped[column]
+		if !known {
+			// A column the Preset says nothing about — a plugin's key in usermeta — is
+			// one more decision and not a disagreement with one.
+			out[column] = recorded
+			continue
+		}
+		merged, d := drifted(name(column), recorded, ships)
+		out[column] = merged
+		if d != nil {
+			drift = append(drift, *d)
+		}
+	}
+	return out, drift
 }
 
 // clone copies a Preset's tables down to their column maps.

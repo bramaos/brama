@@ -33,9 +33,9 @@ func TestEveryShippedPresetHoldsTogether(t *testing.T) {
 		cfg := &config.Config{
 			Version:   config.SchemaVersion,
 			App:       config.App{Adapter: p.Name},
-			Anonymize: p.Apply(nil),
+			Anonymize: mustApply(t, p.Name),
 		}
-		if _, problems := anonymize.Check(cfg, nil); len(problems) > 0 {
+		if _, problems := anonymize.Check(cfg, nil, nil); len(problems) > 0 {
 			t.Errorf("the %s preset does not hold together: %v", p.Name, problems)
 		}
 	}
@@ -184,7 +184,8 @@ func mustLookup(t *testing.T, name string) preset.Preset {
 
 func mustApply(t *testing.T, name string) *config.Anonymize {
 	t.Helper()
-	return mustLookup(t, name).Apply(nil)
+	a, _ := mustLookup(t, name).Apply(nil)
+	return a
 }
 
 // columns is one table classified per column, the shape most of the merge tests bend.
@@ -195,15 +196,18 @@ func columns(cols map[string]config.Column) config.Table {
 // A project's own answer is the deliberate override, and it is per column. Writing one
 // column of `wp_users` must not take responsibility for the other nine — which is the
 // whole reason the preset is referenced rather than expanded.
+//
+// The override here exposes no more than the preset does, which is the only kind the file
+// settles on its own: one that loosened the preset would be held for review instead.
 func TestApplyOverridesOneColumnAndLeavesTheRestToThePreset(t *testing.T) {
 	p := mustLookup(t, "wordpress")
 
-	a := p.Apply(&config.Anonymize{Preset: "wordpress", Tables: map[string]config.Table{
-		"wp_users": columns(map[string]config.Column{"display_name": {Action: config.Keep}}),
+	a, _ := p.Apply(&config.Anonymize{Preset: "wordpress", Tables: map[string]config.Table{
+		"wp_users": columns(map[string]config.Column{"display_name": {Action: config.Drop}}),
 	}})
 
 	users := a.Tables["wp_users"]
-	if got := users.Columns["display_name"].Action; got != config.Keep {
+	if got := users.Columns["display_name"].Action; got != config.Drop {
 		t.Errorf("wp_users.display_name = %q, want the file's answer", got)
 	}
 	if got := users.Columns["user_email"].Action; got != "fake.email" {
@@ -216,7 +220,7 @@ func TestApplyOverridesOneColumnAndLeavesTheRestToThePreset(t *testing.T) {
 func TestApplyKeepsATableThePresetDoesNotKnow(t *testing.T) {
 	p := mustLookup(t, "wordpress")
 
-	a := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
+	a, _ := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
 		"acme_leads": columns(map[string]config.Column{"lead_email": {Action: "fake.email"}}),
 	}})
 
@@ -231,7 +235,7 @@ func TestApplyKeepsATableThePresetDoesNotKnow(t *testing.T) {
 func TestApplyKeepsTheDiscriminatorWhenTheFileOverridesAColumn(t *testing.T) {
 	p := mustLookup(t, "wordpress")
 
-	a := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
+	a, _ := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
 		"wp_usermeta": columns(map[string]config.Column{"user_id": {Action: config.Drop}}),
 	}})
 
@@ -252,7 +256,7 @@ func TestApplyKeepsTheDiscriminatorWhenTheFileOverridesAColumn(t *testing.T) {
 func TestApplyAddsAKeyToTheOnesThePresetClassifies(t *testing.T) {
 	p := mustLookup(t, "wordpress")
 
-	a := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
+	a, _ := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
 		"wp_usermeta": {Keys: map[string]config.Column{"acme_vat_number": {Action: config.Drop}}},
 	}})
 
@@ -270,7 +274,7 @@ func TestApplyAddsAKeyToTheOnesThePresetClassifies(t *testing.T) {
 func TestApplyDoesNotWriteBackIntoTheShippedPreset(t *testing.T) {
 	p := mustLookup(t, "wordpress")
 
-	p.Apply(&config.Anonymize{Tables: map[string]config.Table{
+	_, _ = p.Apply(&config.Anonymize{Tables: map[string]config.Table{
 		"wp_users": columns(map[string]config.Column{"user_email": {Action: config.Keep}}),
 	}})
 

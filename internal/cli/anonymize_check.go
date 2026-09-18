@@ -14,6 +14,7 @@ import (
 
 	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
+	"github.com/bramaos/brama/internal/preset"
 	"github.com/bramaos/brama/internal/refusal"
 	"github.com/bramaos/brama/internal/renderer"
 	"github.com/bramaos/brama/internal/schema"
@@ -30,6 +31,10 @@ type AnonymizeCheckResult struct {
 	// none. The Summary counts what that Preset classifies, so saying where those
 	// columns came from is what stops the counts reading as a file nobody can find.
 	Preset string
+	// Drift is every column the Preset and the file disagree about, and which of the two
+	// brama acts on. It is empty on a project that names no Preset, and on one whose
+	// record agrees with the one it names.
+	Drift preset.Drifts
 	// SchemaFrom names the Environment whose Schema the classification was compared
 	// against, and is empty when none could be reached.
 	SchemaFrom string
@@ -80,8 +85,12 @@ func (r *AnonymizeCheckResult) coverage() coverageState {
 // job: the columns a database has and the file does not are still Unclassified and a
 // Pull still refuses. Reporting that as success is the one answer nobody can act on,
 // so it is partial — in the machine contract as well as in the prose.
+// Drift is partial for the same reason. A Preset that disagrees with the file leaves
+// something for a person to do either way round — accept a loosening, or write an
+// applied tightening back into the file — and a run that reported success would be
+// telling a caller there was nothing left.
 func (r *AnonymizeCheckResult) Status() renderer.Status {
-	if r.coverage() == coverageComplete {
+	if r.coverage() == coverageComplete && len(r.Drift) == 0 {
 		return renderer.StatusSuccess
 	}
 	return renderer.StatusPartial
@@ -111,6 +120,62 @@ func (r *AnonymizeCheckResult) Headline() string {
 // Notes says what this run could not settle, and names what it found that the file
 // does not. A clean check is not a clean bill of health unless it read a schema.
 func (r *AnonymizeCheckResult) Notes() []string {
+	return append(r.driftNotes(), r.coverageNotes()...)
+}
+
+// driftNotes says where the Preset and the file disagree, in two blocks that never run
+// together into one list.
+//
+// Applied and held are opposite instructions. One says brama is already doing something
+// the file does not say; the other says brama is refusing to do something the Preset
+// does say. A reader scanning a single list of column names would act on the wrong half.
+func (r *AnonymizeCheckResult) driftNotes() []string {
+	var notes []string
+	if applied := r.Drift.Applied(); len(applied) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"the %s preset is stricter than %s on %s — brama anonymizes %s already, and "+
+				"`brama anonymize review` writes the file back into agreement:",
+			r.Preset, filepath.Base(r.Path), plural(len(applied), "column"), itThem(len(applied))))
+		notes = append(notes, indent(applied)...)
+		// Said here rather than reported against the approval itself. An approval of a
+		// column the file keeps is not a mistake — it was written beside a classification
+		// that agreed with it — and refusing the run over one would stop the pull that
+		// the tightening exists to make safe.
+		notes = append(notes, "  an approval of one of these sends nothing while it is applied")
+	}
+	if held := r.Drift.Held(); len(held) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"the %s preset is looser than %s on %s — sending real values is a decision only "+
+				"a human makes, so this is held and %s stands until `brama anonymize review` accepts it:",
+			r.Preset, filepath.Base(r.Path), plural(len(held), "column"), theFilesAnswer(len(held))))
+		notes = append(notes, indent(held)...)
+	}
+	return notes
+}
+
+func indent(drift preset.Drifts) []string {
+	out := make([]string, 0, len(drift))
+	for _, d := range drift {
+		out = append(out, "  "+d.String())
+	}
+	return out
+}
+
+func itThem(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
+}
+
+func theFilesAnswer(n int) string {
+	if n == 1 {
+		return "the file's answer"
+	}
+	return "the file's answers"
+}
+
+func (r *AnonymizeCheckResult) coverageNotes() []string {
 	switch r.coverage() {
 	case coverageUnread:
 		return []string{"column coverage was not verified — this run read no schema, " +
@@ -137,7 +202,12 @@ func (r *AnonymizeCheckResult) Fields() []renderer.Field {
 		Add("tables", "Tables", r.Summary.Tables).
 		Add("columns", "Columns", r.Summary.Columns).
 		Add("correlation_groups", "Correlation groups", r.Summary.Groups).
-		AddOptional("schema", "Schema read from", r.SchemaFrom, "no environment was reachable")
+		AddOptional("schema", "Schema read from", r.SchemaFrom, "no environment was reachable").
+		// Both counts are always present and always separate. A caller acting on one
+		// number for "the preset and the file differ" would be acting on a tightening
+		// brama has already carried out and a loosening it has refused to.
+		Add("preset_drift_applied", "Preset stricter, applied", len(r.Drift.Applied())).
+		Add("preset_drift_held", "Preset looser, held", len(r.Drift.Held()))
 
 	// The coverage keys are always present, so a caller reads the same shape from
 	// every run. Which one it is reading is what `schema` and the notes answer: where
@@ -186,6 +256,10 @@ func newAnonymizeCheckCmd(env *console) *cobra.Command {
 			"a generator brama does not have, a correlate beside a classification it means\n" +
 			"nothing on, a correlation group with one member, an approval of a column that\n" +
 			"is not kept.\n\n" +
+			"Where the file names a preset it also reports the columns the two disagree\n" +
+			"about: the ones the preset now classifies more strictly, which brama applies\n" +
+			"on its own, and the ones it classifies less strictly, which are held until\n" +
+			"`brama anonymize review` accepts them.\n\n" +
 			"It writes nothing, and it runs on a CI runner with no route to production.\n" +
 			"Where an environment is reachable it also reads that database's schema and\n" +
 			"compares the two: which columns nothing classifies, and whether a generator\n" +
@@ -245,18 +319,19 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 	// carrying on without them would call every column it was holding unclassified and
 	// refuse every approval of one — a hundred lines of consequence stacked on top of
 	// the one typo that caused them.
-	resolved, unresolved := anonymize.Resolve(cfg)
+	resolved, drift, unresolved := anonymize.Resolve(cfg)
 	if len(unresolved) > 0 {
 		return refusal.New(refusal.Invalid, problemDetail(unresolved), "")
 	}
 
-	summary, problems := anonymize.Check(resolved, environments)
+	summary, problems := anonymize.Check(resolved, environments, drift)
 
 	result := &AnonymizeCheckResult{
 		Path:         path,
 		Environments: environments,
 		Summary:      summary,
 		Preset:       resolved.Anonymize.Preset,
+		Drift:        drift,
 	}
 	read, from, err := readSchema(ctx, cfg, environments, source)
 	if err != nil {

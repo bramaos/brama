@@ -19,22 +19,29 @@ import (
 // `keep` arrives here as a Classification and as nothing else, and the Environment that
 // receives real values is still only the one a human wrote an Approval on. See ADR 0010.
 //
+// It also returns the Drift: every column where the Preset and the record disagree about
+// exposure, and which of the two brama acts on. Resolution is where that is decided, so
+// it is the only place that can say it happened — and the file it was decided against is
+// left exactly as it was found. A Preset tightening is applied here and written back
+// nowhere; `brama anonymize review` is the one command that edits brama.yaml.
+//
 // An unknown name is a Problem rather than an error, so one run reports it beside
 // everything else wrong with the file, and the rest of the check still runs against
 // what the file does say.
-func Resolve(cfg *config.Config) (*config.Config, []Problem) {
+func Resolve(cfg *config.Config) (*config.Config, preset.Drifts, []Problem) {
 	if cfg.Anonymize == nil || cfg.Anonymize.Preset == "" {
-		return cfg, nil
+		return cfg, nil, nil
 	}
 
 	p, err := preset.Lookup(cfg.Anonymize.Preset)
 	if err != nil {
-		return cfg, []Problem{{At: "anonymize.preset", Detail: err.Error()}}
+		return cfg, nil, []Problem{{At: "anonymize.preset", Detail: err.Error()}}
 	}
 
 	// A shallow copy: nothing below replaces anything but the Classification, and the
 	// caller's config is left saying what its file says.
 	resolved := *cfg
-	resolved.Anonymize = p.Apply(cfg.Anonymize)
-	return &resolved, nil
+	anonymized, drift := p.Apply(cfg.Anonymize)
+	resolved.Anonymize = anonymized
+	return &resolved, drift, nil
 }

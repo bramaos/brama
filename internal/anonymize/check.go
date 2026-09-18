@@ -22,6 +22,7 @@ import (
 
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/generator"
+	"github.com/bramaos/brama/internal/preset"
 )
 
 // Problem is one way the committed Classification contradicts itself.
@@ -61,7 +62,12 @@ type Summary struct {
 // the whole file at once, and it does not repeat the ones it can. Resolve is what makes
 // the columns a Preset classifies visible here — unresolved, they are columns this
 // would report as classified by nobody.
-func Check(cfg *config.Config, environments []string) (Summary, []Problem) {
+//
+// drift is what Resolve reported about the same file, and it is here for one reason: a
+// Classification an upgrade substituted for the recorded one is not something the project
+// wrote, and an Approval left standing beside it is not a contradiction the project can
+// be asked to fix. See checkApprovals.
+func Check(cfg *config.Config, environments []string, drift preset.Drifts) (Summary, []Problem) {
 	var problems []Problem
 	add := func(at, detail string) {
 		problems = append(problems, Problem{At: at, Detail: detail})
@@ -123,7 +129,7 @@ func Check(cfg *config.Config, environments []string) (Summary, []Problem) {
 		add(members[0]+".correlate", detail)
 	}
 
-	problems = append(problems, checkApprovals(cfg, environments)...)
+	problems = append(problems, checkApprovals(cfg, environments, drift)...)
 	return summarize(cfg.Anonymize, groups), problems
 }
 
@@ -132,7 +138,7 @@ func Check(cfg *config.Config, environments []string) (Summary, []Problem) {
 // An Approval is a human's decision to send real values somewhere, so the one thing it
 // must never be is inert. Approving a column the file classifies `fake.email` reads,
 // in a diff, exactly like approving one it classifies `keep` — and does nothing.
-func checkApprovals(cfg *config.Config, environments []string) []Problem {
+func checkApprovals(cfg *config.Config, environments []string, drift preset.Drifts) []Problem {
 	var problems []Problem
 	for _, name := range environments {
 		env, known := cfg.Environments[name]
@@ -148,6 +154,13 @@ func checkApprovals(cfg *config.Config, environments []string) []Problem {
 
 			column, classified := classificationOf(cfg.Anonymize, ref)
 			switch {
+			case classified && column.Action != config.Keep && drift.Tightened(ref.String()):
+				// The file classifies this `keep` and approves it, and a Preset brama
+				// tightened since has overridden the classification. The approval is
+				// inert, and saying so as a Refusal would blame a pair of lines that
+				// agreed with each other when they were written — and would stop a Pull
+				// over a tightening that is meant to resolve on its own. It is reported
+				// as the Drift it is instead.
 			case classified && column.Action != config.Keep:
 				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
 					"%s is classified %s, and approval only means something beside keep — "+

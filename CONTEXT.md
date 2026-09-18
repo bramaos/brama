@@ -115,6 +115,15 @@ Approval: a Preset can say a column holds a public display name and still author
 Environment to receive it.
 _Avoid_: template, profile, defaults
 
+**Preset drift**:
+A column the Preset and the recorded Classification disagree about, once upgrading Brama
+has changed what the Preset says. The stricter of the two wins: a Preset moving a column
+off `keep` is applied on its own, a Preset moving one onto `keep` is held until a human
+passes it through review. The record is the baseline, so there is no version to pin and no
+history to keep. Always said with "Preset" — drift between Environments is a different
+thing and not this one.
+_Avoid_: conflict, divergence, staleness, upgrade
+
 **Unclassified**:
 A column, or a Discriminator value, found in the source with no Classification. Causes a
 Refusal.

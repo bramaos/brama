@@ -12,6 +12,7 @@ import (
 
 	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
+	"github.com/bramaos/brama/internal/preset"
 	"github.com/bramaos/brama/internal/refusal"
 	"github.com/bramaos/brama/internal/renderer"
 	"github.com/bramaos/brama/internal/schema"
@@ -526,5 +527,206 @@ func TestCheckTreatsAPresetsKeepAsUnapprovedUntilAHumanApprovesIt(t *testing.T) 
 	approved := projectFile(t, block, map[string]string{"local": "wp_options.option_value"})
 	if err := runAnonymizeCheck(t.Context(), env, approved, "", unreachable); err != nil {
 		t.Fatalf("runAnonymizeCheck() = %v, want an approval of a preset-kept column accepted", err)
+	}
+}
+
+// Preset drift, both directions, in one run.
+//
+// `wp_users.user_email` records `keep` where the preset ships `fake.email`: the preset is
+// stricter, so brama anonymizes it already and the file is out of step until review.
+// `wp_posts.post_content` records `drop` where the preset ships `keep`: the preset is
+// looser, so it is held and the file's answer stands. The two are reported apart, because
+// "brama is already doing this" and "brama is refusing to do this" are opposite
+// instructions to whoever is reading.
+func TestCheckReportsPresetDriftApartFromHeld(t *testing.T) {
+	root := classifiedProject(t, `anonymize:
+  preset: wordpress
+  tables:
+    wp_users:
+      columns:
+        user_email:
+          action: keep
+    wp_posts:
+      columns:
+        post_content:
+          action: drop
+`)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want drift reported and not refused", err)
+	}
+
+	printed := out.String()
+	for _, want := range []string{
+		"is stricter than", "wp_users.user_email: keep → fake.email",
+		"is looser than", "wp_posts.post_content: drop → keep",
+		"brama anonymize review",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("output does not say %q:\n%s", want, printed)
+		}
+	}
+	if strings.Index(printed, "wp_users.user_email") > strings.Index(printed, "is looser than") {
+		t.Errorf("the applied drift is printed under the held heading:\n%s", printed)
+	}
+}
+
+// The machine contract counts the two separately for the same reason the prose separates
+// them. One number for "the preset and the file differ" would put a tightening brama has
+// already carried out and a loosening it has refused to in the same bucket.
+func TestCheckCountsAppliedAndHeldDriftSeparately(t *testing.T) {
+	root := classifiedProject(t, `anonymize:
+  preset: wordpress
+  tables:
+    wp_users:
+      columns:
+        user_email:
+          action: keep
+        user_pass:
+          action: keep
+    wp_posts:
+      columns:
+        post_content:
+          action: drop
+`)
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload["preset_drift_applied"] != float64(2) || payload["preset_drift_held"] != float64(1) {
+		t.Errorf("payload = %v, want two applied and one held", payload)
+	}
+}
+
+// Drift leaves something for a person to do either way round, so a run that found any is
+// partial. Reporting success would tell a caller there was nothing left.
+func TestCheckIsPartialWhileAnythingHasDrifted(t *testing.T) {
+	drifted := &AnonymizeCheckResult{
+		Path:     "brama.yaml",
+		Preset:   "wordpress",
+		Coverage: &anonymize.Coverage{Columns: 1},
+		Drift: []preset.Drift{{
+			Name: "wp_users.user_email", Recorded: config.Keep, Shipped: "fake.email", Applied: true,
+		}},
+	}
+	if drifted.Status() != renderer.StatusPartial {
+		t.Errorf("Status() = %q, want partial while the file and the preset disagree", drifted.Status())
+	}
+
+	agreed := *drifted
+	agreed.Drift = nil
+	if agreed.Status() != renderer.StatusSuccess {
+		t.Errorf("Status() = %q, want success with full coverage and no drift", agreed.Status())
+	}
+}
+
+// Drift is decided on every read and written back on none. The tightening brama applies
+// is applied in memory: `brama anonymize review` is the only command that edits the file,
+// so a check in CI cannot dirty the checkout or turn a read into a source-control event.
+func TestCheckWritesNothingWhenAPresetHasDrifted(t *testing.T) {
+	root := classifiedProject(t, `anonymize:
+  preset: wordpress
+  tables:
+    wp_users:
+      columns:
+        user_email:
+          action: keep
+`)
+	env, _, _ := testEnv()
+	path := filepath.Join(root, config.Filename)
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("check wrote the applied tightening back into brama.yaml, want the file untouched")
+	}
+
+	// And the config a read path hands back still says what the file says.
+	cfg, _, err := config.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Anonymize.Tables["wp_users"].Columns["user_email"].Action; got != config.Keep {
+		t.Errorf("loaded wp_users.user_email = %q, want the file's own answer", got)
+	}
+}
+
+// A project that records no classification has no baseline, so there is nothing for the
+// preset to have drifted from and every preset answer applies as-is.
+func TestCheckReportsNoDriftWithNothingRecorded(t *testing.T) {
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v", err)
+	}
+	if strings.Contains(out.String(), "is stricter than") || strings.Contains(out.String(), "is looser than") {
+		t.Errorf("output reports drift against no baseline:\n%s", out.String())
+	}
+}
+
+// A tightening resolves on its own, including over an approval.
+//
+// The file keeps `wp_users.user_email` and local approves it — two lines that agreed with
+// each other when they were written. A preset brama tightened since overrides the
+// classification, which leaves the approval inert. Refusing there would blame the project
+// for brama's own decision, and would stop the pull the tightening exists to make safe.
+func TestCheckDoesNotRefuseAnApprovalAPresetTighteningMadeInert(t *testing.T) {
+	root := projectFile(t, `anonymize:
+  preset: wordpress
+  tables:
+    wp_users:
+      columns:
+        user_email:
+          action: keep
+`, map[string]string{"local": "wp_users.user_email"})
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want the tightening reported and not refused", err)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "wp_users.user_email: keep → fake.email") {
+		t.Errorf("output does not report the tightening:\n%s", printed)
+	}
+	if !strings.Contains(printed, "an approval of one of these sends nothing") {
+		t.Errorf("output does not say the approval is now inert:\n%s", printed)
+	}
+}
+
+// An approval of a column nothing tightened is still refused. The suppression above is
+// for the columns brama overrode, and for no others.
+func TestCheckStillRefusesAnApprovalOfAFakedColumn(t *testing.T) {
+	root := projectFile(t, `anonymize:
+  preset: wordpress
+  tables:
+    wp_users:
+      columns:
+        user_login:
+          action: drop
+`, map[string]string{"local": "wp_users.user_login"})
+	env, _, _ := testEnv()
+
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", unreachable))
+
+	if !strings.Contains(r.Detail, "wp_users.user_login") {
+		t.Errorf("Detail = %q, want the approval of a dropped column refused", r.Detail)
 	}
 }

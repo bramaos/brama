@@ -11,6 +11,22 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Apply a preset's answer over your own where the preset is the stricter of the two, so
+  a preset brama tightens in a later release protects a column in every project that
+  names it — including the projects whose `brama.yaml` still says `keep`. (#54, #7)
+- Hold a preset's answer where it is the looser of the two. A preset that starts keeping
+  a column your file fabricates never widens what leaves production on its own: your
+  file's answer stands until `brama anonymize review` accepts the change. (#54, #7)
+- Report both in `brama anonymize check`, counted and listed apart — the columns brama is
+  already anonymizing more strictly than the file says, and the ones it is holding — so
+  neither reads as the other. A run that finds either is reported as `partial`. (#54, #7)
+- Accept an approval of a column a preset has since tightened, rather than refusing the
+  run over it. Approving a column your file keeps is not a mistake, and a tightening that
+  stopped the pull it exists to make safe would be the wrong way round — `brama anonymize
+  check` says the approval sends nothing while the tightening is applied. (#54, #7)
+- Compare a preset against your file only where your file has an answer. A project that
+  has recorded no classification has nothing for the preset to disagree with, and every
+  preset answer applies as written. (#54, #7)
 - Classify a project with `anonymize.preset`, which names a classification brama
   ships for a framework it knows rather than spelling it out. `tables:` then holds
   only what is specific to your project and the overrides you meant, so the block
@@ -23,7 +39,8 @@ See `docs/agents/changelog.md` for how entries are written.
   release reaches your project without anyone editing `brama.yaml`. (#53, #7)
 - Let `anonymize.tables` override a preset one column at a time. Writing a column of
   a table the preset knows changes that column and leaves the rest of the table to
-  the preset. (#53, #7)
+  the preset. An override that would send more real data than the preset does is held
+  for review rather than applied. (#53, #7, #54)
 - Write `preset: <name>` from `brama anonymize init` when brama ships one for your
   adapter, and leave the columns it already answers for out of the file. A preset is
   a deliberate statement about a table brama knows; a generator's name pattern is an
