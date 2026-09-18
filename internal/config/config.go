@@ -63,6 +63,10 @@ type Environment struct {
 	URL  string `yaml:"url"`
 	// Paths overrides App.Paths key by key. Usually absent.
 	Paths *Paths `yaml:"paths,omitempty"`
+	// Anonymize is this Environment's Approval — which `keep` columns it may receive
+	// as real data. Classification lives at the top level instead, because what a
+	// column means is the same everywhere and who may see it is not.
+	Anonymize *EnvironmentAnonymize `yaml:"anonymize,omitempty"`
 }
 
 // Server is an SSH host. Host is passed to OpenSSH untouched — it may be a hostname,

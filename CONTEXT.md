@@ -81,7 +81,8 @@ that word names a weaker, reversible thing Brama deliberately does not do.
 
 **Classification**:
 The recorded decision of what happens to a column's values during Anonymization. Exactly
-one of `fake`, `keep`, or `drop`.
+one of `fake.<generator>`, `keep`, or `drop`, written as a column's `action`. `fake` alone
+is not one: which Generator fabricates the value is part of the decision.
 _Avoid_: rule, policy, mapping, tag
 
 **Generator**:

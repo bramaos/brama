@@ -135,6 +135,80 @@ environments:
 	}
 }
 
+// The classification model is the longest, most heavily annotated part of a real
+// brama.yaml, and the part a reviewer reads most closely. An edit to `servers` has no
+// business touching it: not the comments, not the key order, not a byte.
+func TestAddServerLeavesTheClassificationModelUntouched(t *testing.T) {
+	classification := `anonymize:
+  preset: wordpress
+
+  tables:
+    users:
+      columns:
+        # Faked, and correlated: the same address becomes the same fake address
+        # everywhere it appears, so the joins survive.
+        email:
+          action: fake.email
+          correlate: customer
+        display_name:
+          action: keep       # real names, where a destination approves them
+        internal_note:
+          action: drop
+
+    usermeta:
+      discriminator: meta_key
+      value: meta_value
+      keys:
+        billing_phone:
+          action: fake.phone
+      columns:
+        umeta_id:
+          action: keep
+`
+	doc := `version: 1
+
+app:
+  adapter: wordpress
+  paths:
+    config: wp-config.php
+    uploads: wp-content/uploads
+
+environments:
+  local:
+    url: https://acme.local.test
+    anonymize:
+      approved: []          # this laptop never receives real values
+  production:
+    server: prod
+    path: /var/www/app
+    url: https://acme.com
+
+# servers:
+#   prod:
+#     host: prod.example.com
+
+` + classification
+
+	out, err := config.AddServer([]byte(doc), "prod", config.Server{Host: "hetzner-prod"})
+	if err != nil {
+		t.Fatalf("AddServer: %v", err)
+	}
+
+	mustContain(t, out, classification)
+	mustContain(t, out, "      approved: []          # this laptop never receives real values")
+
+	cfg, err := config.Parse(out)
+	if err != nil {
+		t.Fatalf("edited file does not validate: %v\n\n%s", err, out)
+	}
+	if got := cfg.Anonymize.Tables["users"].Columns["email"].Correlate; got != "customer" {
+		t.Errorf("users.email.correlate = %q, want customer to survive the edit", got)
+	}
+	if cfg.Environments["local"].Approves("users", "display_name") {
+		t.Error("local approves nothing, and the edit must not change that")
+	}
+}
+
 // parseServers reads back only the servers block, so a test asserts on the meaning
 // of the edited file rather than on its exact bytes.
 func parseServers(t *testing.T, doc []byte) map[string]config.Server {

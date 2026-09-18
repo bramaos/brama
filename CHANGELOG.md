@@ -11,6 +11,15 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Let `brama.yaml` express the full classification model. A column is an object
+  carrying `action` — `fake.<generator>`, `keep`, or `drop` — and an optional
+  `correlate` naming the identity mapping it shares. Authorization is not among them:
+  an environment lists the columns it may receive as real data under
+  `environments.<name>.anonymize.approved`, as `table.column` references. A
+  key/value table can now describe its `keys` and its ordinary `columns` at the same
+  time, which it previously could not, so a column like `wp_usermeta.umeta_id` has
+  somewhere to be classified. There is no scalar shorthand: `email: fake.email` is a
+  parse error naming the column and the line that replaces it. (#48, #7)
 - Add `make testenv-up`, which starts two containerised servers running real `sshd`
   for `brama server add` and the shim install to be tested against. (#41)
 - Publish `brama` for `linux` and `darwin`, on `amd64` and `arm64`, as an archive per
