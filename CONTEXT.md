@@ -84,13 +84,33 @@ The recorded decision of what happens to a column's values during Anonymization.
 one of `fake`, `keep`, or `drop`.
 _Avoid_: rule, policy, mapping, tag
 
+**Generator**:
+The named recipe a `fake` Classification fabricates its value with — `fake.email`,
+`fake.full_name`. Brama owns the vocabulary, and a Generator declares which column types and
+names it claims, so nothing is ever fabricated by resemblance.
+_Avoid_: faker, formatter, strategy, and provider — that word already names an
+infrastructure vendor.
+
+**Correlation group**:
+A set of columns sharing one identity, so a real value occurring in all of them becomes the
+same fabricated value in all of them and the joins between them survive Anonymization.
+_Avoid_: link, alias, identity map, seed
+
+**Approval**:
+An Environment's permission to receive the real values of a `keep` column. Distinct from
+Classification: Classification settles what a column means, Approval settles where its real
+values may go. Only a human grants one.
+_Avoid_: consent, exception, allowlist, override
+
 **Discriminator**:
 The column whose value selects which Classification applies to a row, for tables that
 store many kinds of value in one column — `wp_usermeta.meta_key`.
 _Avoid_: key column, EAV key, type column
 
 **Preset**:
-The Classification an Adapter ships for the tables it already knows.
+The Classification an Adapter ships for the tables it already knows. Knowledge, never
+Approval: a Preset can say a column holds a public display name and still authorize no
+Environment to receive it.
 _Avoid_: template, profile, defaults
 
 **Unclassified**:
