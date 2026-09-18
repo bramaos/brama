@@ -25,6 +25,24 @@ type Fallback struct {
 	// Column is what to call it in a sentence — `wp_users.display_name`, or
 	// `wp_usermeta.meta_key=first_name` for a Discriminator value.
 	Column string
+	// Table is the table the column belongs to, unqualified, and Field is the column's
+	// own name — or the Discriminator value, for a keyed entry.
+	//
+	// Column reads as a sentence and these two write into a file, which is why both
+	// exist — the same split Drift makes, for the same reason. An interactive review
+	// records an Approval of `table.column` or amends
+	// `anonymize.tables.<table>.columns.<column>`, and taking a printable name apart
+	// again to get there is a parser for a format nobody defined.
+	Table string
+	Field string
+	// Keyed says the entry is one Discriminator value rather than a column.
+	//
+	// It is the difference between a decision a person can answer here and one they
+	// cannot. An Approval names a `table.column`, and the column holding a Discriminator
+	// value holds every other key's value too — approving it would approve all of them
+	// at once, which is why `check` refuses the attempt rather than reading it
+	// generously.
+	Keyed bool
 	// Action is the Classification brama acts on in place of `keep` — always a
 	// `fake.<generator>`. Empty means no Generator claims the column and there is
 	// nothing to fall back to, which is the Refusal, not a quiet `drop`.
@@ -120,7 +138,13 @@ func Effective(cfg *config.Config, environments []string) Fallbacks {
 				continue
 			}
 
-			fallback := Fallback{Environment: name, Column: e.name}
+			fallback := Fallback{
+				Environment: name,
+				Column:      e.name,
+				Table:       e.table,
+				Field:       e.field,
+				Keyed:       e.keyed,
+			}
 			// Claimed by name alone. The type half of a claim needs a Schema, and this
 			// has to answer on a CI runner with no route to a database — and where a
 			// Schema is in reach, a Generator that cannot fit the column it claims is

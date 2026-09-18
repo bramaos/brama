@@ -11,6 +11,29 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Answer the pending half in a terminal. `brama anonymize review` now puts what only you
+  can decide as a checklist — one per destination environment, one line per column — and
+  the question it asks is "do you approve exposing this column as real data?" rather than
+  "keep this column?". Nothing starts ticked. (#57, #7)
+- See what declining writes before you decide it: each line shows the classification that
+  stands if you leave it unticked, so nothing is a leap. A column no generator claims says
+  so, and is left for you. (#57, #7)
+- Tick a line and the approval is recorded under that destination's
+  `environments.<name>.anonymize.approved` and no other. Leave it unticked and the
+  classification the line showed is written to `anonymize.tables` — unless another
+  destination approves the same column, which leaves the `keep` standing and sends the
+  fabricated value to the destination that declined. That holds for a destination this
+  run never asked about, so `--env local` cannot revoke an approval staging already had.
+  (#57, #7)
+- Decide a preset's keeps once: they arrive as a single line naming how many columns it
+  is about, openable to the full list before you answer it. A hundred checkboxes before
+  anybody has pulled anything makes accept-all the only realistic answer, which authorizes
+  exactly as blindly as trusting the preset would have. (#57, #7)
+- Accept or hold a preset's loosenings as their own question, asked after the
+  destinations and never mixed into one of their lists. (#57, #7)
+- `--non-interactive`, on every command, for a person who wants the run an agent gets. It
+  refuses to ask rather than skipping a guardrail: the answer brama takes when nobody
+  answers is always the narrower one. `--json`, a pipe, and no terminal do the same. (#57)
 - Reconcile a classification with `brama anonymize review`, the one command that writes
   one. With nobody at the keyboard it does the half of the job that is not a decision and
   hands back the half that is, which is the whole of what a CI runner or an agent gets.
