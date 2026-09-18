@@ -11,6 +11,22 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Add `brama anonymize check`, which validates the classification in `brama.yaml`
+  and exits 42 when it does not hold together. It writes nothing and reaches no
+  database, so it runs on a CI runner with no route to production. (#50, #7)
+- Refuse a `fake.<generator>` naming a generator `brama` does not have, listing the
+  ones it does. (#50, #7)
+- Refuse `correlate` beside `keep` or `drop`, where it decides nothing: real values
+  already correlate, and a dropped value has nothing to relate. (#50, #7)
+- Refuse a correlation group with one member — the guard against `correlate:
+  custmer` quietly becoming a group of its own — and suggest the near-miss group
+  name when there is one. (#50, #7)
+- Refuse an approval of a column that is not classified `keep`, or that nothing
+  classifies at all. Approval only means something where real values would
+  otherwise be sent. (#50, #7)
+- Check every environment's approvals by default, and narrow to one with
+  `brama anonymize check --env <name>`. There is no `--ci` flag: `--json` is the
+  machine-readable contract. (#50, #7)
 - Classify a column in `brama.yaml` with `action`, which is `fake.<generator>`,
   `keep`, or `drop`. `fake` on its own is refused: naming the generator is part of
   the decision. (#48, #7)

@@ -13,9 +13,13 @@ type Reason string
 
 const (
 	// Unclassified is a column, or a discriminator value, with no Classification.
-	// The only Reason v0.1 can produce; `upward` and `policy` arrive with the
-	// commands that can raise them.
+	// `upward` and `policy` arrive with the commands that can raise them.
 	Unclassified Reason = "unclassified"
+	// Invalid is a Classification the file states and brama cannot carry out — a
+	// Generator that does not exist, a `correlate` beside a `keep`, a correlation
+	// group with one member. Distinct from Unclassified: a decision was written
+	// down, and it is not one that can be acted on.
+	Invalid Reason = "invalid_classification"
 )
 
 // Refusal is a declined operation.
