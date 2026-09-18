@@ -105,7 +105,8 @@ _Avoid_: consent, exception, allowlist, override
 
 **Discriminator**:
 The column whose value selects which Classification applies to a row, for tables that
-store many kinds of value in one column — `wp_usermeta.meta_key`.
+store many kinds of value in one column — `wp_usermeta.meta_key`. The column it selects
+*for* is named beside it as the table's `value` — `wp_usermeta.meta_value`.
 _Avoid_: key column, EAV key, type column
 
 **Preset**:

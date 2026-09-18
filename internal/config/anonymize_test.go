@@ -8,7 +8,7 @@ import (
 )
 
 // The classification model has three axes and three homes: `action` says what a
-// column means, `correlate` says which identity mapping it shares, and `approved`
+// column means, `correlate` says which Correlation group it belongs to, and `approved`
 // — on the Environment, not the column — says which destination may receive real
 // values. These tests are as much about what the file cannot say as what it can.
 // See docs/adr/0010-classification-and-approval-are-separate-axes.md.
@@ -121,7 +121,7 @@ func TestAnonymizeRejectsAnythingThatIsNotAnAction(t *testing.T) {
 		wantErr string
 	}{
 		{"invented", "maybe", "fake.<generator>, keep, or drop"},
-		{"masking", "mask", "fake.<generator>, keep, or drop"},
+		{"masking", "mask", "pseudonymization brama does not do"},
 		{"fake without a generator", "fake", "name the generator"},
 		{"fake with an empty generator", "fake.", "name the generator"},
 		{"wrong case", "Keep", "fake.<generator>, keep, or drop"},
@@ -187,6 +187,33 @@ func TestAnonymizeRequiresTheDiscriminatorPairAndItsKeys(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// A table name with nothing under it reads in the diff like a decision and is none.
+func TestAnonymizeRejectsATableThatClassifiesNothing(t *testing.T) {
+	for _, body := range []string{
+		"anonymize:\n  tables:\n    users: {}\n",
+		"anonymize:\n  tables:\n    users:\n",
+	} {
+		err := parseErr(t, valid+body)
+		if !strings.Contains(err.Error(), "anonymize.tables.users classifies nothing") {
+			t.Errorf("error = %q, want it to say the table classifies nothing", err)
+		}
+	}
+}
+
+// A column written as a sequence is still not an object, but quoting a whole block
+// back at the reader helps nobody — the message drops to the shape alone.
+func TestAnonymizeRejectsANonScalarWrittenWhereAColumnGoes(t *testing.T) {
+	body := "anonymize:\n  tables:\n    users:\n      columns:\n        email:\n          - action: keep\n"
+
+	err := parseErr(t, valid+body)
+	if !strings.Contains(err.Error(), "a column is an object") {
+		t.Errorf("error = %q, want it to name the shape", err)
+	}
+	if strings.Contains(err.Error(), "write `action: -") {
+		t.Errorf("error = %q, want it not to quote the sequence back", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -14,8 +15,9 @@ import (
 // there is no fourth meaning "not sure": a column with no Classification is
 // Unclassified, and Unclassified refuses the Pull.
 //
-// `mask` is not among them, and is refused by name. Partial preservation derives its
-// output from the real value, which is the pseudonymization ADR 0002 exists to prevent.
+// `mask` is not among them, and is refused by name rather than as an unknown word: it
+// derives its output from the real value, which is the pseudonymization ADR 0002 exists
+// to prevent.
 type Classification string
 
 const (
@@ -50,24 +52,30 @@ func (c Classification) Generator() (string, bool) {
 	return name, true
 }
 
-// Valid reports whether c is a Classification, and says why when it is not. The
-// explanation is separate from the check because the three ways to get this wrong want
-// three different sentences: `fake` is the old shorthand, `fake.Email` is a name no
-// Generator has, and `mask` is not an answer at all.
-func (c Classification) Valid() error {
+// Validate says why c is not a Classification, and nil when it is. The ways to get this
+// wrong want different sentences: `mask` is a word this project refuses outright, `fake`
+// is a decision left half-made, and `fake.Email` is a name no Generator could have.
+func (c Classification) Validate() error {
 	switch c {
 	case Keep, Drop:
 		return nil
-	case "fake":
+	case "mask":
+		return errors.New(
+			`"mask" is not an action — masking derives its output from the real value, ` +
+				"which is the pseudonymization brama does not do; use fake.<generator>, keep, or drop")
+	}
+
+	// Bare `fake` names no Generator, so it falls through to the same sentence as
+	// `fake.` — the problem is identical, and the old shorthand deserves no special
+	// treatment beyond being told what it is missing.
+	name, fakes := c.Generator()
+	if !fakes && c != "fake" {
+		return fmt.Errorf("%q is not an action — must be fake.<generator>, keep, or drop", string(c))
+	}
+	if name == "" {
 		return fmt.Errorf("%q does not say what to fabricate — name the generator, as in fake.email", string(c))
 	}
-	name, fakes := c.Generator()
-	switch {
-	case !fakes:
-		return fmt.Errorf("%q is not an action — must be fake.<generator>, keep, or drop", string(c))
-	case name == "":
-		return fmt.Errorf("%q does not say what to fabricate — name the generator, as in fake.email", string(c))
-	case !generatorName.MatchString(name):
+	if !generatorName.MatchString(name) {
 		return fmt.Errorf("%q is not a generator name — lowercase letters, digits and underscores, as in fake.full_name", name)
 	}
 	return nil
@@ -132,7 +140,7 @@ type Table struct {
 type Column struct {
 	// Action is what happens to the values — the column's Classification.
 	Action Classification `yaml:"action"`
-	// Correlate names the identity mapping this column shares, so a real value
+	// Correlate names the Correlation group this column belongs to, so a real value
 	// occurring in every member becomes the same fabricated value in all of them and
 	// the joins between them survive. Meaningful only alongside `fake.*`; that, and
 	// whether the group has more than one member, is settled by `anonymize check`.
@@ -148,8 +156,15 @@ type Column struct {
 func (c *Column) UnmarshalYAML(node ast.Node) error {
 	mapping, ok := node.(ast.MapNode)
 	if !ok {
-		return fmt.Errorf("%s: a column is an object — write `action: %s` under it, not `%s`",
-			yamlPath(node), node.String(), node.String())
+		// Only a scalar is quoted back. A sequence written here would drag its whole
+		// block into the message, and "write `action: - keep`" is worse than silence.
+		if scalar, ok := node.(ast.ScalarNode); ok {
+			written := fmt.Sprint(scalar.GetValue())
+			return fmt.Errorf("%s: a column is an object — write `action: %s` under it, not `%s`",
+				yamlPath(node), written, written)
+		}
+		return fmt.Errorf("%s: a column is an object — write `action:`, and optionally `correlate:`, under it",
+			yamlPath(node))
 	}
 
 	// `approved` beside an action is the one unknown key worth a sentence of its own,
@@ -274,6 +289,14 @@ func (c *Config) validateAnonymize(add func(string, ...any)) {
 		table := c.Anonymize.Tables[name]
 		at := "anonymize.tables." + name
 
+		// A table entry that classifies nothing is not a neutral statement — it reads
+		// like a decision in the diff and is none, and every column in it stays
+		// Unclassified. Whoever wrote the name meant to say something about it.
+		if table.Discriminator == "" && table.Value == "" && len(table.Keys) == 0 && len(table.Columns) == 0 {
+			add("%s classifies nothing — give it columns, or a discriminator and keys, or remove it", at)
+			continue
+		}
+
 		// The three discriminated keys are one decision written in three places, so a
 		// Table carrying any of them has to carry all of them. Two out of three
 		// classifies nothing, and does it silently.
@@ -304,7 +327,7 @@ func validateColumn(add func(string, ...any), at string, col Column) {
 		add("%s.action is required — one of fake.<generator>, keep, or drop", at)
 		return
 	}
-	if err := col.Action.Valid(); err != nil {
+	if err := col.Action.Validate(); err != nil {
 		add("%s.action: %s", at, err)
 	}
 }
