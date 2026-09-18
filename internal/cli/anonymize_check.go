@@ -168,6 +168,17 @@ func fallbackNames(fallbacks anonymize.Fallbacks) []string {
 	return out
 }
 
+// uncoveredNames is one line a column — its name and the type the Schema declares for
+// it, indented under whatever sentence introduced them. Three commands report the same
+// list of columns nothing classifies, and they say it the same way.
+func uncoveredNames(uncovered []anonymize.Uncovered) []string {
+	out := make([]string, 0, len(uncovered))
+	for _, u := range uncovered {
+		out = append(out, u.String()+" "+u.Column.Declared)
+	}
+	return indentAll(out)
+}
+
 func indentAll(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -251,12 +262,9 @@ func (r *AnonymizeCheckResult) coverageNotes() []string {
 		return []string{"column coverage was not verified — this run read no schema, " +
 			"and a column the database has and this file does not is still unclassified"}
 	case coverageIncomplete:
-		notes := make([]string, 0, len(r.Coverage.Unclassified)+1)
-		notes = append(notes, fmt.Sprintf("unclassified in %s — a pull refuses until each one is decided:", r.SchemaFrom))
-		for _, u := range r.Coverage.Unclassified {
-			notes = append(notes, "  "+u.String()+" "+u.Column.Declared)
-		}
-		return notes
+		return append(
+			[]string{fmt.Sprintf("unclassified in %s — a pull refuses until each one is decided:", r.SchemaFrom)},
+			uncoveredNames(r.Coverage.Unclassified)...)
 	case coverageComplete:
 		// The schema was read and the file answers for all of it. The one run with
 		// nothing left to say.
@@ -393,22 +401,15 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 			"brama anonymize init")
 	}
 
-	// The Preset is read in before anything is checked, and never written back. What
-	// the file says plus what the Preset ships is what a Pull would act on, so it is
-	// what `check` has to hold up — a column the Preset classifies is not a column
-	// anybody left undecided.
-	//
-	// A name that did not resolve stops the run here rather than joining the report.
-	// Everything after this point reads the Preset's answers as classification, so
-	// carrying on without them would call every column it was holding unclassified and
-	// refuse every approval of one — a hundred lines of consequence stacked on top of
-	// the one typo that caused them.
-	resolved, drift, unresolved := anonymize.Resolve(cfg)
-	if len(unresolved) > 0 {
-		return refusal.New(refusal.Invalid, problemDetail(unresolved), "")
+	read, err := inspect(ctx, cfg, environments, source)
+	if err != nil {
+		return err
 	}
-
-	summary, problems := anonymize.Check(resolved, environments, drift)
+	// The refusal comes after the whole inspection so that one run says everything
+	// wrong with the file, whether it needed a database to see it or not.
+	if len(read.Problems) > 0 {
+		return refusal.New(refusal.Invalid, problemDetail(read.Problems), "")
+	}
 
 	// What each destination would receive, which is Classification and Approval read
 	// together. It is reported rather than refused: `check` validates the file, and a
@@ -418,25 +419,12 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 	result := &AnonymizeCheckResult{
 		Path:         path,
 		Environments: environments,
-		Summary:      summary,
-		Preset:       resolved.Anonymize.Preset,
-		Drift:        drift,
-		Fallbacks:    anonymize.Effective(resolved, environments),
-	}
-	read, from, err := readSchema(ctx, cfg, environments, source)
-	if err != nil {
-		return err
-	}
-	if from != "" {
-		coverage, uncoverable := anonymize.Cover(resolved.Anonymize, read)
-		result.SchemaFrom, result.Coverage = from, &coverage
-		problems = append(problems, uncoverable...)
-	}
-
-	// The refusal comes after the comparison so that one run says everything wrong
-	// with the file, whether it needed a database to see it or not.
-	if len(problems) > 0 {
-		return refusal.New(refusal.Invalid, problemDetail(problems), "")
+		Summary:      read.Summary,
+		Preset:       read.Resolved.Anonymize.Preset,
+		Drift:        read.Drift,
+		Fallbacks:    anonymize.Effective(read.Resolved, environments),
+		SchemaFrom:   read.SchemaFrom,
+		Coverage:     read.Coverage,
 	}
 
 	// Unclassified columns are reported, not refused. Whether `check` stops on them is
@@ -446,6 +434,67 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 		return fmt.Errorf("rendering the check result: %w", err)
 	}
 	return nil
+}
+
+// inspection is everything one run can find out about a project's Classification
+// without writing to it: what the file means once its Preset is read in, what the two
+// disagree about, and what a Schema says that neither of them does.
+//
+// It is one type rather than six return values because the two commands that need it
+// need all of it. `check` reports it and `review` acts on half of it, and a command
+// assembling its own half of the answer is how the two end up disagreeing about what
+// the same file says.
+type inspection struct {
+	// Resolved is the config with the Preset read in — what a Pull would act on.
+	Resolved *config.Config
+	// Drift is every column the Preset and the file disagree about.
+	Drift preset.Drifts
+	// Summary counts what the file classifies.
+	Summary anonymize.Summary
+	// SchemaFrom names the Environment whose Schema was read, empty when none was in
+	// reach.
+	SchemaFrom string
+	// Coverage is the comparison against that Schema, nil when SchemaFrom is empty. The
+	// two are separate so that "nothing is unclassified" can never be read off a run
+	// that never saw a column list.
+	Coverage *anonymize.Coverage
+	// Problems is every way the file contradicts itself. The caller decides what to do
+	// about them, because a read-only command and a writing one owe the reader different
+	// next steps.
+	Problems []anonymize.Problem
+}
+
+// inspect resolves the Preset, validates what the file says, and compares it against a
+// Schema where one is in reach.
+//
+// The Preset is read in before anything is checked, and never written back. What the
+// file says plus what the Preset ships is what a Pull would act on, so it is what has to
+// be held up — a column the Preset classifies is not a column anybody left undecided.
+//
+// A name that did not resolve stops the inspection there rather than joining the report.
+// Everything after that point reads the Preset's answers as classification, so carrying
+// on without them would call every column it was holding unclassified and refuse every
+// approval of one — a hundred lines of consequence stacked on top of the one typo that
+// caused them.
+func inspect(ctx context.Context, cfg *config.Config, environments []string, source schemaSource) (inspection, error) {
+	resolved, drift, unresolved := anonymize.Resolve(cfg)
+	if len(unresolved) > 0 {
+		return inspection{Resolved: resolved, Problems: unresolved}, nil
+	}
+
+	out := inspection{Resolved: resolved, Drift: drift}
+	out.Summary, out.Problems = anonymize.Check(resolved, environments, drift)
+
+	read, from, err := readSchema(ctx, cfg, environments, source)
+	if err != nil {
+		return inspection{}, err
+	}
+	if from != "" {
+		coverage, uncoverable := anonymize.Cover(resolved.Anonymize, read)
+		out.SchemaFrom, out.Coverage = from, &coverage
+		out.Problems = append(out.Problems, uncoverable...)
+	}
+	return out, nil
 }
 
 // readSchema returns the first Schema any checked Environment answers with, and the

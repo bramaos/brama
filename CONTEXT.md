@@ -135,6 +135,17 @@ history to keep. Always said with "Preset" — drift between Environments is a d
 thing and not this one.
 _Avoid_: conflict, divergence, staleness, upgrade
 
+**Review**:
+Reconciling the recorded Classification with what Brama would actually do, and the only
+thing that writes `brama.yaml`'s anonymize block after `init` bootstrapped it. It divides
+a run in two and never merges the halves: what narrows exposure — a Preset tightening, a
+column a migration added that a Generator claims — is applied without asking and listed;
+what widens it — a held Preset loosening, a `keep` the destination has not approved — is
+named and left for a human. With no terminal the second half is handed back as the
+`review_required` Refusal.
+_Avoid_: reconcile, sync, update, resolve — resolution is what a Pull computes, not what
+a person decides
+
 **Unclassified**:
 A column, or a Discriminator value, found in the source with no Classification. Causes a
 Refusal.

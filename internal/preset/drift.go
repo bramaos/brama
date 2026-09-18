@@ -20,10 +20,29 @@ type Drift struct {
 	// `wp_users.user_email`, or `wp_usermeta.meta_key=first_name` for a Discriminator
 	// value.
 	Name string
+	// Table is the table the disagreement is about.
+	Table string
+	// Column is the ordinary column it is about, and is empty when Key is set.
+	Column string
+	// Key is the Discriminator value it is about, and is empty when Column is set.
+	//
+	// Name reads as a sentence and these three write into a file, which is why both
+	// exist. `brama anonymize review` has to find the entry a Drift refers to under
+	// `anonymize.tables.<table>.columns.<column>` or `.keys.<key>`, and taking a
+	// printable name apart again to get there is a parser for a format nobody defined.
+	Key string
 	// Recorded is what brama.yaml says about the column.
 	Recorded config.Classification
 	// Shipped is what the Preset says about it.
 	Shipped config.Classification
+	// Correlate is the Correlation group the Preset's answer belongs to, and is empty
+	// where it belongs to none.
+	//
+	// It travels with the answer because it is part of it. A tightening applied without
+	// it drops the column out of its group, and a group of one correlates nothing — so
+	// writing the action alone would turn a Preset improvement into a file `check`
+	// refuses.
+	Correlate string
 	// Applied is whether the Preset's answer is the one brama acts on. A tightening is
 	// applied and needs nothing from anybody; a loosening is held, and the recorded
 	// answer stands until a human accepts the change.
@@ -98,16 +117,17 @@ func exposes(c config.Classification) bool { return c == config.Keep }
 //
 // Where the two expose the same thing the record wins, silently. That is the deliberate
 // per-column override, and reporting it every run would bury the two cases that matter.
-func drifted(name string, recorded, shipped config.Column) (config.Column, *Drift) {
+// at carries the identity of the column — everything about the Drift that is true
+// before the two answers are compared.
+func drifted(at Drift, recorded, shipped config.Column) (config.Column, *Drift) {
 	if exposes(recorded.Action) == exposes(shipped.Action) {
 		return recorded, nil
 	}
-	d := Drift{
-		Name:     name,
-		Recorded: recorded.Action,
-		Shipped:  shipped.Action,
-		Applied:  exposes(recorded.Action),
-	}
+	d := at
+	d.Recorded = recorded.Action
+	d.Shipped = shipped.Action
+	d.Correlate = shipped.Correlate
+	d.Applied = exposes(recorded.Action)
 	if d.Applied {
 		return shipped, &d
 	}

@@ -20,6 +20,12 @@ const (
 	// group with one member. Distinct from Unclassified: a decision was written
 	// down, and it is not one that can be acted on.
 	Invalid Reason = "invalid_classification"
+	// ReviewRequired is work left for a human: an unapproved `keep`, or a Preset
+	// loosening held back from applying itself. Nothing went wrong and nothing was
+	// skipped — `brama anonymize review` did the mechanical half and stopped at the
+	// half that is a decision. It exits 42 like every other Refusal, which is what
+	// makes a CI job fail on it without reading prose.
+	ReviewRequired Reason = "review_required"
 	// NoFallback is a `keep` column the destination has not approved and no Generator
 	// claims, so there is nothing to send it as. Brama may reduce exposure by
 	// derivation — it may not invent destructive policy by emptying a column nobody

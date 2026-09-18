@@ -137,20 +137,20 @@ func override(table string, shipped, over config.Table) (config.Table, Drifts) {
 		shipped.Value = over.Value
 	}
 
-	keys, keyDrift := mergeColumns(shipped.Keys, over.Keys, func(key string) string {
-		return table + "." + shipped.Discriminator + "=" + key
+	keys, keyDrift := mergeColumns(shipped.Keys, over.Keys, func(key string) Drift {
+		return Drift{Name: table + "." + shipped.Discriminator + "=" + key, Table: table, Key: key}
 	})
-	columns, columnDrift := mergeColumns(shipped.Columns, over.Columns, func(column string) string {
-		return table + "." + column
+	columns, columnDrift := mergeColumns(shipped.Columns, over.Columns, func(column string) Drift {
+		return Drift{Name: table + "." + column, Table: table, Column: column}
 	})
 	shipped.Keys, shipped.Columns = keys, columns
 	return shipped, append(keyDrift, columnDrift...)
 }
 
-// mergeColumns merges one map of project answers over the Preset's. name says what to
-// call one of them in a sentence, which is the one thing a Drift out of here carries and
-// the one thing that differs between a table's keys and its ordinary columns.
-func mergeColumns(shipped, over map[string]config.Column, name func(string) string) (map[string]config.Column, Drifts) {
+// mergeColumns merges one map of project answers over the Preset's. at says where one of
+// them lives and what to call it in a sentence, which is the only thing that differs
+// between a table's keys and its ordinary columns.
+func mergeColumns(shipped, over map[string]config.Column, at func(string) Drift) (map[string]config.Column, Drifts) {
 	if len(over) == 0 {
 		return shipped, nil
 	}
@@ -169,7 +169,7 @@ func mergeColumns(shipped, over map[string]config.Column, name func(string) stri
 			out[column] = recorded
 			continue
 		}
-		merged, d := drifted(name(column), recorded, ships)
+		merged, d := drifted(at(column), recorded, ships)
 		out[column] = merged
 		if d != nil {
 			drift = append(drift, *d)

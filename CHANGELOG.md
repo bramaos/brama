@@ -11,6 +11,24 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Reconcile a classification with `brama anonymize review`, the one command that writes
+  one. With nobody at the keyboard it does the half of the job that is not a decision and
+  hands back the half that is, which is the whole of what a CI runner or an agent gets.
+  (#56, #7)
+- Apply and write down what narrows what leaves production: the columns a preset now
+  classifies more strictly than your file does, and the columns a migration added that a
+  generator declares a claim on. Neither needs anybody's approval, and both are listed so
+  that nothing lands invisibly. The comments, the key order and every line the change is
+  not about survive the write, and a run with nothing to apply writes no bytes at all.
+  (#56, #7)
+- Hand back what widens it, applying none of it: the columns a preset would loosen, and
+  the kept columns a destination approves nothing for. Each is named, and the run exits
+  `review_required` at 42 — nothing went wrong, and the work left is work only you can
+  do. A run with nothing waiting exits 0. (#56, #7)
+- Read both lanes in `--json` under `applied_preset_tightenings`, `applied_new_columns`,
+  `pending_preset_loosenings` and `pending_keeps`, with `reason` carrying the exit. All
+  four keys are always present, and an empty list means nothing was found rather than
+  nothing was looked for. (#56, #7)
 - Resolve what each environment would actually receive, from its
   `environments.<name>.anonymize.approved` list read together with the classification. An
   approval counts for that environment and no other, so the same `keep` column can send

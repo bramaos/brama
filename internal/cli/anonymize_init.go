@@ -79,13 +79,10 @@ func (r *AnonymizeInitResult) Notes() []string {
 	if len(r.Unclassified) == 0 {
 		return nil
 	}
-	notes := make([]string, 0, len(r.Unclassified)+1)
-	notes = append(notes, "no generator claimed these, so they are left out of the file and "+
-		"unclassified — a pull refuses until each one is decided with brama anonymize review:")
-	for _, u := range r.Unclassified {
-		notes = append(notes, "  "+u.String()+" "+u.Column.Declared)
-	}
-	return notes
+	return append(
+		[]string{"no generator claimed these, so they are left out of the file and " +
+			"unclassified — a pull refuses until each one is decided with brama anonymize review:"},
+		uncoveredNames(r.Unclassified)...)
 }
 
 func (r *AnonymizeInitResult) Fields() []renderer.Field {
@@ -241,7 +238,7 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 		// the two halves of the report cannot disagree about which columns those are.
 		Covered:      coverage.Columns - len(coverage.Unclassified),
 		Tables:       tables,
-		Unclassified: leftUnclassified(coverage, tables),
+		Unclassified: anonymize.Unclaimed(coverage, tables),
 		DryRun:       dryRun,
 	}
 	if err := env.Renderer.Result(result); err != nil {
@@ -251,25 +248,4 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 		return env.writeSkeletonPreview(updated)
 	}
 	return nil
-}
-
-// leftUnclassified is what the Schema has and the written block still does not — the
-// columns no Generator claimed. It is derived from what was written rather than
-// recomputed from the Generators, so the two halves of the report can never disagree
-// about which columns those are.
-func leftUnclassified(coverage anonymize.Coverage, tables []config.TableClassification) []anonymize.Uncovered {
-	written := make(map[string]bool, len(coverage.Unclassified))
-	for _, t := range tables {
-		for _, c := range t.Columns {
-			written[t.Name+"."+c.Name] = true
-		}
-	}
-
-	var left []anonymize.Uncovered
-	for _, u := range coverage.Unclassified {
-		if !written[u.String()] {
-			left = append(left, u)
-		}
-	}
-	return left
 }

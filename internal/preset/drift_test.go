@@ -77,6 +77,26 @@ func TestADiscriminatorKeyDrifts(t *testing.T) {
 	if d.Name != "wp_usermeta.meta_key=first_name" {
 		t.Errorf("Name = %q, want the key named by its discriminator", d.Name)
 	}
+	if d.Table != "wp_usermeta" || d.Key != "first_name" || d.Column != "" {
+		t.Errorf("drift = %+v, want the key located under keys, not columns", d)
+	}
+}
+
+// A Drift says where the entry lives as well as what to call it, because
+// `brama anonymize review` writes the applied half back into the file and has to find
+// the entry to write. Taking the printed name apart again would be a parser for a format
+// nobody defined.
+func TestDriftLocatesTheEntryItIsAbout(t *testing.T) {
+	p := mustLookup(t, "wordpress")
+
+	_, drift := p.Apply(&config.Anonymize{Tables: map[string]config.Table{
+		"wp_users": columns(map[string]config.Column{"user_email": {Action: config.Keep}}),
+	}})
+
+	d := only(t, drift)
+	if d.Table != "wp_users" || d.Column != "user_email" || d.Key != "" {
+		t.Errorf("drift = %+v, want the column located under columns, not keys", d)
+	}
 }
 
 // Two answers that expose the same thing are not drift. `fake.first_name` where the

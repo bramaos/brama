@@ -52,6 +52,29 @@ func Bootstrap(c Coverage) []config.TableClassification {
 	return tables
 }
 
+// Unclaimed is what the Schema has that neither the file nor a Generator answers for:
+// the Coverage a Bootstrap left behind.
+//
+// It is derived from what was written rather than recomputed from the Generators, so
+// the two halves of a report — what brama classified, and what it left for a person —
+// can never disagree about which columns those are.
+func Unclaimed(c Coverage, classified []config.TableClassification) []Uncovered {
+	written := make(map[string]bool, len(c.Unclassified))
+	for _, t := range classified {
+		for _, col := range t.Columns {
+			written[t.Name+"."+col.Name] = true
+		}
+	}
+
+	var left []Uncovered
+	for _, u := range c.Unclassified {
+		if !written[u.String()] {
+			left = append(left, u)
+		}
+	}
+	return left
+}
+
 // Claimed counts the columns a Classification was written for.
 func Claimed(tables []config.TableClassification) int {
 	var n int

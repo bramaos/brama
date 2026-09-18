@@ -530,7 +530,7 @@ Hardcoded. No configuration.
 ## 12. Roadmap
 
 **v0.1 — Anonymized downward sync.** The differentiator, first.
-`init`, `server add`, `anonymize init`, `anonymize check`, `db pull`, `files pull`, `doctor`, `logs`. WordPress. MySQL and PostgreSQL. The Shim.
+`init`, `server add`, `anonymize init`, `anonymize review`, `anonymize check`, `db pull`, `files pull`, `doctor`, `logs`. WordPress. MySQL and PostgreSQL. The Shim.
 
 **v0.2 — Safe deployment, and the boundary.**
 `deploy`, `backup`, `rollback`, Releases, health checks, atomic symlink swap. Forced-command hardening at `server add`. `brama identity add` and the Policy engine, Server-stored. Structured operations. Laravel adapter.

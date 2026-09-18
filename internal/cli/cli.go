@@ -39,6 +39,18 @@ const initVerb = "init"
 // line would contradict them.
 var ErrAlreadyReported = errors.New("already reported")
 
+// reported marks an outcome the command has already rendered, so Main sets the exit
+// code and prints nothing more.
+//
+// It is how a command whose run produced a Result *and* stopped short says both in one
+// payload: `anonymize review` applies the automatic half, reports it in the two lanes,
+// and still exits 42 because the other half is a decision it is not allowed to make.
+// Rendering the Refusal on top would repeat in prose what the Result just said, and
+// would put a second object in a machine contract that is one object per run.
+func reported(err error) error {
+	return fmt.Errorf("%w: %w", ErrAlreadyReported, err)
+}
+
 // console is what commands render through. It exists so a test can swap the renderer
 // and the streams without touching a global.
 //
@@ -131,8 +143,12 @@ func Main(version string) int {
 		return ExitError
 	}
 
+	// A Refusal the command already reported still exits 42 — the code is the contract,
+	// and it is the same whether the news arrived as a Refusal or inside a Result.
 	if r, ok := refusal.As(err); ok {
-		_ = env.Renderer.Refused(commandPath(root), r)
+		if !errors.Is(err, ErrAlreadyReported) {
+			_ = env.Renderer.Refused(commandPath(root), r)
+		}
 		return ExitRefused
 	}
 	if errors.Is(err, ErrAlreadyReported) {
