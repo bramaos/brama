@@ -223,7 +223,7 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 		return err
 	}
 
-	environments, err := environmentsToCheck(cfg, only)
+	environments, err := environmentsFor(cfg, only)
 	if err != nil {
 		return err
 	}
@@ -291,12 +291,13 @@ func readSchema(ctx context.Context, cfg *config.Config, environments []string, 
 	return schema.Schema{}, "", nil
 }
 
-// environmentsToCheck is every Environment, or the one --env named.
+// environmentsFor is every Environment, or the one --env named. Both anonymize
+// commands narrow the same way, from the same flag, and share this.
 //
 // An unknown name is an error rather than a Refusal or an empty run: the command was
 // asked about something that does not exist, and quietly checking nothing would exit 0
 // on a typo in a CI pipeline.
-func environmentsToCheck(cfg *config.Config, only string) ([]string, error) {
+func environmentsFor(cfg *config.Config, only string) ([]string, error) {
 	declared := slices.Sorted(maps.Keys(cfg.Environments))
 	if only == "" {
 		return declared, nil

@@ -28,6 +28,11 @@ const (
 	ExitRefused = 42
 )
 
+// initVerb is the name of the two commands that bootstrap a file: `brama init` writes
+// brama.yaml, `brama anonymize init` writes the classification in it. They are the same
+// verb on purpose — each one starts something that is then reviewed and committed.
+const initVerb = "init"
+
 // ErrAlreadyReported marks an error whose outcome the command has already rendered.
 // Wrapping it sets the exit code without printing a second time — which matters most
 // for a partial result, where the fields are the useful output and a trailing error

@@ -11,6 +11,25 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Add `brama anonymize init`, which reads an environment's schema and writes the
+  classification for every column a generator claims — by name and by type — as
+  `action: fake.<generator>`. It is the file `brama init` deliberately does not write.
+  (#52, #7)
+- Leave every column no generator claims out of the file entirely, rather than
+  defaulting it to `drop`. Dropping is safe about privacy and reckless about everything
+  else, and zeroing `orders.total_amount` is a product decision brama has no standing to
+  make about data it could not name. What is omitted stays unclassified, which already
+  refuses a pull. (#52, #7)
+- Never write `keep` from `anonymize init`. Keeping a column sends real production data,
+  and that decision enters `brama.yaml` only where a human put it. (#52, #7)
+- Report `brama anonymize init` as `partial` while anything is still unclassified, and
+  name each column it left for you, so the first `brama anonymize review` has a list to
+  work from. (#52, #7)
+- Refuse to overwrite an anonymize block that already exists, pointing at
+  `brama anonymize review` — which changes decisions one at a time instead of replacing
+  reviewed ones wholesale. (#52, #7)
+- Write the block into `brama.yaml` line by line, so comments, key order and the aligned
+  comments `brama init` wrote survive the edit untouched. (#52, #7)
 - Compare the classification against the schema of a reachable environment, and name
   every column the database has that `brama.yaml` says nothing about. Only a schema can
   say a column is there at all, so this is the half of `brama anonymize check` that a CI
