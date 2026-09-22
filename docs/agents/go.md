@@ -16,7 +16,7 @@ When sources disagree, the one higher in this list wins:
 1. **Repo config.** `.golangci.yml`, the `Makefile`, `.github/workflows/`. The only layer
    that fails a build.
 2. **Existing code.** Consistency first. See the next section.
-3. **Project rules.** `docs/agents/rules/`, once it exists.
+3. **Project rules.** `docs/agents/rules/`.
 4. **These guidelines.**
 5. **References.** `docs/agents/go/references/`.
 

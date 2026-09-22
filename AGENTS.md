@@ -24,15 +24,17 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 ## Agent architecture
 
-Norms for agents are layered by how often they are needed: project rules
-(`docs/agents/rules/`, not yet written), Go guidelines loaded in every session, and Go
-references read on demand. Repo config and existing code outrank all three. Skills are
-procedures and sit outside the chain. See
+Norms for agents are layered by how often they are needed: project rules and Go
+guidelines loaded in every session, and Go references read on demand. Repo config and
+existing code outrank all three. Skills are procedures and sit outside the chain. See
 `docs/adr/0016-go-norms-for-agents-are-layered-by-how-often-they-are-needed.md`.
 
 ### Go code
 
-The Go contract is `docs/agents/go.md`. `CLAUDE.md` imports it. If your harness doesn't
-follow `@` imports, read it before writing Go. Topic depth (context, errors, concurrency,
-interfaces, packages, naming, doc comments, testing, modern Go) lives in
-`docs/agents/go/references/`.
+brama's own decisions are in `docs/agents/rules/`: architecture, commands, config, output,
+testing. Each rule is one line citing where its reason lives. They outrank the Go contract.
+
+The Go contract is `docs/agents/go.md`. `CLAUDE.md` imports it and the rules. If your
+harness doesn't follow `@` imports, read both before writing Go. Topic depth (context,
+errors, concurrency, interfaces, packages, naming, doc comments, testing, modern Go) lives
+in `docs/agents/go/references/`.
