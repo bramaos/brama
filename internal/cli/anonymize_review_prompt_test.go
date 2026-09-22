@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/prompt"
 	"github.com/bramaos/brama/internal/refusal"
@@ -217,10 +218,10 @@ func TestReviewPutsAPresetsKeepsAsOneExpandableItem(t *testing.T) {
 	}
 }
 
-// An approval names a `table.column`, and the column holding a discriminator value holds
-// every other key's value too — ticking one would approve all of them at once. There is
-// no question here anybody could answer, so none is asked.
-func TestReviewDoesNotOfferADiscriminatorKey(t *testing.T) {
+// A discriminator value is classified one key at a time and approved one key at a time,
+// so it is a question somebody can answer and it is asked. The preset's keys are shipped
+// knowledge, so they arrive in the preset's group like every other column it carries.
+func TestReviewOffersADiscriminatorKey(t *testing.T) {
 	root := classifiedProject(t, drifted)
 	env, _, _ := testEnv()
 	a := nobodyTicks()
@@ -231,14 +232,42 @@ func TestReviewDoesNotOfferADiscriminatorKey(t *testing.T) {
 	}
 
 	for _, item := range a.everything() {
-		if strings.Contains(item.Label, "meta_key=") {
-			t.Errorf("a discriminator key was offered as an approval: %q", item.Label)
+		if strings.Contains(strings.Join(item.Members, "\n"), "meta_key=") {
+			return
 		}
-		for _, member := range item.Members {
-			if strings.Contains(member, "meta_key=") {
-				t.Errorf("a discriminator key was folded into a group approval: %q", member)
-			}
-		}
+	}
+	t.Errorf("no discriminator key was put to anybody: %+v", a.everything())
+}
+
+// Ticking a discriminator key records the keyed approval, and that key alone. The column
+// holding its value holds every other key's value too, so an approval of the column would
+// answer for all of them — which is the exposure naming the key exists to prevent.
+func TestReviewRecordsAKeyedApprovalForTheKeyAlone(t *testing.T) {
+	root := classifiedProject(t, drifted)
+	env, _, _ := testEnv()
+	env.Ask = (&answered{tick: func(title string, item prompt.Item) bool {
+		return strings.Contains(title, "`local`") &&
+			strings.Contains(strings.Join(item.Members, "\n"), "meta_key=")
+	}}).ask
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", unreachable); err == nil {
+		t.Fatal("runAnonymizeReview() = nil, want staging still waiting")
+	}
+
+	body := readFile(t, root)
+	if !strings.Contains(body, "wp_usermeta.meta_key=") {
+		t.Errorf("no keyed approval was recorded:\n%s", body)
+	}
+	if strings.Contains(body, "- wp_usermeta.meta_value\n") {
+		t.Errorf("the value column was approved, which answers for every key at once:\n%s", body)
+	}
+
+	cfg := written(t, root)
+	if !cfg.Environments["local"].ApprovesRef(config.ColumnRef{Table: "wp_usermeta", Column: "meta_key", Key: "admin_color"}) {
+		t.Error("local does not approve wp_usermeta.meta_key=admin_color, which is what was ticked")
+	}
+	if cfg.Environments["staging"].ApprovesRef(config.ColumnRef{Table: "wp_usermeta", Column: "meta_key", Key: "admin_color"}) {
+		t.Error("staging approves a key nobody granted it")
 	}
 }
 
@@ -329,6 +358,30 @@ func TestReviewExitsZeroOnceEverythingIsDecided(t *testing.T) {
 	}
 }
 
+// The wordpress preset classifies eighteen `wp_usermeta` discriminator values `keep`. As
+// long as nothing could approve one, every one of them stayed pending and no wordpress
+// project could reach exit 0 — the code that means "only you can do this" was on
+// permanently for work nobody could do. Naming the key is what closes the loop.
+func TestReviewExitsZeroOnAWordpressProject(t *testing.T) {
+	// The preset and nothing else. `drifted` holds a loosening on a column no generator
+	// claims, which is a file edit a person makes and a different issue entirely.
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	env, _, _ := testEnv()
+	env.Ask = (&answered{tick: func(string, prompt.Item) bool { return true }}).ask
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeReview() = %v, want success — everything was decided", err)
+	}
+	a := nobodyTicks()
+	env.Ask = a.ask
+	if err := runAnonymizeReview(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("the second run = %v, want the decisions to have stuck", err)
+	}
+	if len(a.titles) != 0 {
+		t.Errorf("the second run asked %v, want a decided file to ask nothing", a.titles)
+	}
+}
+
 // Declining a column the preset keeps writes an answer stricter than the preset's, which
 // is by definition a preset loosening — so the re-read finds the decision that was just
 // made. Handing somebody their own answer back as the work left to do is the one thing
@@ -387,5 +440,29 @@ func TestInteractiveIsNilForAMachine(t *testing.T) {
 	}
 	if interactive(false, true) != nil {
 		t.Error("--non-interactive got an asker, want no question asked")
+	}
+}
+
+// A discriminator value is not a column. Calling eighteen keys "18 columns" sends the
+// reader looking through `columns:` for eighteen entries that are not there.
+func TestPendingNamesKeysAsKeysAndColumnsAsColumns(t *testing.T) {
+	column := anonymize.Fallback{Table: "users", Field: "email"}
+	key := anonymize.Fallback{Table: "usermeta", Field: "admin_color", Discriminator: "meta_key"}
+
+	tests := []struct {
+		name  string
+		keeps anonymize.Fallbacks
+		want  string
+	}{
+		{"columns alone", anonymize.Fallbacks{column, column}, "2 columns"},
+		{"keys alone", anonymize.Fallbacks{key, key}, "2 keys"},
+		{"one of each", anonymize.Fallbacks{column, key}, "1 column and 1 key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := keptCount(tt.keeps); got != tt.want {
+				t.Errorf("keptCount() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

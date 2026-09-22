@@ -98,16 +98,19 @@ same fabricated value in all of them and the joins between them survive Anonymiz
 _Avoid_: link, alias, identity map, seed
 
 **Approval**:
-An Environment's permission to receive the real values of a `keep` column. Distinct from
-Classification: Classification settles what a column means, Approval settles where its real
-values may go. Only a human grants one.
+An Environment's permission to receive the real values of a `keep` column, or of one
+Discriminator value — `users.display_name`, or `wp_usermeta.meta_key=admin_color`. Distinct
+from Classification: Classification settles what a column means, Approval settles where its
+real values may go. Only a human grants one. It addresses exactly what Classification
+addresses, so an answer is never broader than the question it answers.
 _Avoid_: consent, exception, allowlist, override
 
 **Substitution**:
-What an Environment receives in place of a `keep` column's real values when it holds no
-Approval for that column: the Classification the Generator claiming the column would have
-given it. Derived on every run from Classification plus Approval, never written down, so a
-column carries one `action` and no per-destination shadow of it. Where no Generator claims
+What an Environment receives in place of the real values of a `keep` column, or of a
+`keep` Discriminator value, when it holds no Approval for that one: the Classification the
+Generator claiming it would have given it. Derived on every run from Classification plus
+Approval, never written down, so a column carries one `action` and no per-destination
+shadow of it. Where no Generator claims
 the column there is no Substitution and the operation refuses — Brama may reduce exposure
 by derivation, it may not invent destructive policy. Said of the value; "falls back" is
 said of the resolution that produces it, and a column nothing claims is one with no
@@ -149,9 +152,9 @@ Reconciling the recorded Classification with what Brama would actually do, and t
 thing that writes `brama.yaml`'s anonymize block after `init` bootstrapped it. It divides
 a run in two and never merges the halves: what narrows exposure — a Preset tightening, a
 column a migration added that a Generator claims — is applied without asking and listed;
-what widens it — a held Preset loosening, a `keep` the destination has not approved — is
-named and left for a human. With no terminal the second half is handed back as the
-`review_required` Refusal.
+what widens it — a held Preset loosening, a `keep` column or Discriminator value the
+destination has not approved — is named and left for a human. With no terminal the second
+half is handed back as the `review_required` Refusal.
 _Avoid_: reconcile, sync, update, resolve — resolution is what a Pull computes, not what
 a person decides
 

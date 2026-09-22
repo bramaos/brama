@@ -9,12 +9,14 @@ import (
 	"github.com/bramaos/brama/internal/refusal"
 )
 
-// approving builds an Environment that approves the given `table.column` references.
+// approving builds an Environment that approves the given references, in either the
+// `table.column` or the `table.column=key` form.
 func approving(refs ...string) config.Environment {
 	approved := make([]config.ColumnRef, 0, len(refs))
 	for _, ref := range refs {
-		table, column, _ := strings.Cut(ref, ".")
-		approved = append(approved, config.ColumnRef{Table: table, Column: column})
+		head, key, _ := strings.Cut(ref, "=")
+		table, column, _ := strings.Cut(head, ".")
+		approved = append(approved, config.ColumnRef{Table: table, Column: column, Key: key})
 	}
 	return config.Environment{Anonymize: &config.EnvironmentAnonymize{Approved: approved}}
 }
@@ -128,6 +130,93 @@ func TestEffectiveResolvesAKeptDiscriminatorValueByItsKey(t *testing.T) {
 	}
 	if !equal(rendered(got), want) {
 		t.Errorf("Effective() = %v, want %v", rendered(got), want)
+	}
+}
+
+// A keyed Approval answers the question a column Approval could not reach. Approving
+// `meta_key=admin_color` resolves that key and leaves every other one exactly where it
+// was, which is the narrowness the keyed form exists for.
+func TestEffectiveResolvesAKeyItsOwnApprovalNames(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_key",
+			Value:         "meta_value",
+			Keys: map[string]config.Column{
+				"first_name":  {Action: config.Keep},
+				"admin_color": {Action: config.Keep},
+			},
+		},
+	}, map[string]config.Environment{"local": approving("usermeta.meta_key=admin_color")})
+
+	got := anonymize.Effective(cfg, []string{"local"})
+
+	want := []string{"local: usermeta.meta_key=first_name keep → fake.first_name"}
+	if !equal(rendered(got), want) {
+		t.Errorf("Effective() = %v, want %v", rendered(got), want)
+	}
+}
+
+// Approval is per destination for a key exactly as it is for a column. One destination's
+// answer is not the other's.
+func TestEffectiveApprovesAKeyAtOneEnvironmentAndNotTheOther(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_key",
+			Value:         "meta_value",
+			Keys:          map[string]config.Column{"admin_color": {Action: config.Keep}},
+		},
+	}, map[string]config.Environment{
+		"staging": approving("usermeta.meta_key=admin_color"),
+		"local":   {},
+	})
+
+	got := anonymize.Effective(cfg, []string{"local", "staging"})
+
+	want := []string{"local: usermeta.meta_key=admin_color"}
+	if !equal(rendered(got), want) {
+		t.Errorf("Effective() = %v, want %v", rendered(got), want)
+	}
+}
+
+// A table has one Discriminator, so an Approval naming a different column selects for
+// nothing. Resolving it as though it had named the right one would send real values on
+// the strength of a line `check` calls malformed — an exposure granted by a typo.
+func TestEffectiveIgnoresAnApprovalThatNamesTheWrongDiscriminator(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_key",
+			Value:         "meta_value",
+			Keys:          map[string]config.Column{"admin_color": {Action: config.Keep}},
+		},
+	}, map[string]config.Environment{"local": approving("usermeta.meta_value=admin_color")})
+
+	got := anonymize.Effective(cfg, []string{"local"})
+
+	want := []string{"local: usermeta.meta_key=admin_color"}
+	if !equal(rendered(got), want) {
+		t.Errorf("Effective() = %v, want the key still unapproved", rendered(got))
+	}
+}
+
+// A keyed Fallback carries the Discriminator column beside the key, because recording an
+// Approval needs both and taking the printed name apart again is a parser for a format
+// nobody defined.
+func TestEffectiveCarriesTheDiscriminatorBesideTheKey(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_key",
+			Value:         "meta_value",
+			Keys:          map[string]config.Column{"admin_color": {Action: config.Keep}},
+		},
+	}, map[string]config.Environment{"local": {}})
+
+	got := anonymize.Effective(cfg, []string{"local"})
+
+	if len(got) != 1 {
+		t.Fatalf("Effective() = %v, want one entry", rendered(got))
+	}
+	if !got[0].Keyed() || got[0].Discriminator != "meta_key" || got[0].Field != "admin_color" {
+		t.Errorf("fallback = %+v, want the discriminator meta_key beside the key admin_color", got[0])
 	}
 }
 

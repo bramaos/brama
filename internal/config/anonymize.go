@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -190,35 +191,65 @@ func (c *Column) UnmarshalYAML(node ast.Node) error {
 	return nil
 }
 
-// ColumnRef names one column of one table — `users.display_name`. It is how an
-// Environment refers to a Classification that lives somewhere else, which is the whole
-// point: the reference is per destination, the Classification is not.
+// ColumnRef names one classified thing in one table — `users.display_name`, or the one
+// Discriminator value `usermeta.meta_key=admin_color`. It is how an Environment refers to
+// a Classification that lives somewhere else, which is the whole point: the reference is
+// per destination, the Classification is not.
+//
+// The two forms exist because Classification already has both. A Discriminator value is
+// classified one key at a time under `anonymize.tables.<table>.keys.<key>`, and an
+// Approval that could only name a column would have no way to answer what the file said
+// about one key — the column holding `admin_color`'s value holds every other key's value
+// too, so approving it would approve all of them at once. Naming the key is what makes
+// the answer as narrow as the question. See
+// docs/adr/0015-an-approval-names-a-discriminator-value-by-its-key.md.
 type ColumnRef struct {
 	Table  string
 	Column string
+	// Key is the Discriminator value this reference is for, and empty for an ordinary
+	// column. Where it is set, Column is the table's Discriminator rather than the
+	// column whose real values are at stake.
+	Key string
 }
 
 func (r ColumnRef) String() string {
+	if r.Key != "" {
+		return r.Table + "." + r.Column + "=" + r.Key
+	}
 	return r.Table + "." + r.Column
 }
 
-// UnmarshalYAML reads the `table.column` form, and only that form.
+// Keyed reports whether this reference names a Discriminator value rather than a column.
+func (r ColumnRef) Keyed() bool { return r.Key != "" }
+
+// UnmarshalYAML reads the `table.column` form and the `table.column=key` form, and only
+// those two.
 //
 // A bare column name is refused rather than matched loosely: `display_name` would
 // approve real values in every table that happens to have one, which is a far larger
-// decision than the one being written down.
+// decision than the one being written down. A half-written key — `usermeta.meta_key=` —
+// is refused for the same reason in reverse: it reads like it names something and names
+// nothing.
 func (r *ColumnRef) UnmarshalYAML(node ast.Node) error {
 	var ref string
 	if err := yaml.NodeToValue(node, &ref, yaml.Strict()); err != nil {
 		return fmt.Errorf("%s: an approval is a table.column reference: %w", yamlPath(node), err)
 	}
 
-	table, column, found := strings.Cut(ref, ".")
-	if !found || table == "" || column == "" || strings.Contains(column, ".") {
+	// The key is cut off first. A Discriminator value is a value and may hold a dot —
+	// `wp_user-settings-time` does not, but nothing says the next one will not — so
+	// reading it before the table.column half keeps the dot rule where it belongs.
+	head, key, keyed := strings.Cut(ref, "=")
+	table, column, found := strings.Cut(head, ".")
+	switch {
+	case !found || table == "" || column == "" || strings.Contains(column, "."):
 		return fmt.Errorf("%s: %q is not a table.column reference — name both, as in users.display_name",
 			yamlPath(node), ref)
+	case keyed && (key == "" || strings.Contains(key, "=")):
+		return fmt.Errorf("%s: %q is not a table.column=key reference — name the discriminator and one of its values, as in usermeta.meta_key=admin_color",
+			yamlPath(node), ref)
 	}
-	r.Table, r.Column = table, column
+	r.Table, r.Column, r.Key = table, column, key
 	return nil
 }
 
@@ -241,13 +272,22 @@ func (e Environment) Approves(table, column string) bool {
 	if e.Anonymize == nil {
 		return false
 	}
-	want := ColumnRef{Table: table, Column: column}
-	for _, ref := range e.Anonymize.Approved {
-		if ref == want {
-			return true
-		}
+	return e.ApprovesRef(ColumnRef{Table: table, Column: column})
+}
+
+// ApprovesRef reports whether this Environment may receive the real values the reference
+// names, in either form.
+//
+// The match is the whole reference and never part of one, which is what keeps the two
+// forms from answering for each other: `usermeta.meta_key=admin_color` says nothing about
+// a column called `admin_color`, `usermeta.meta_key` says nothing about any key, and an
+// approval naming the wrong Discriminator selects for nothing rather than for the key it
+// looks like it meant. Approving by resemblance is the one thing an Approval must not do.
+func (e Environment) ApprovesRef(ref ColumnRef) bool {
+	if e.Anonymize == nil {
+		return false
 	}
-	return false
+	return slices.Contains(e.Anonymize.Approved, ref)
 }
 
 // yamlPath is the node's location spelled the way the file spells it —

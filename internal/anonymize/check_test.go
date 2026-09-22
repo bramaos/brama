@@ -323,6 +323,106 @@ func TestCheckSaysApprovingADiscriminatedValueColumnCoversNoKeys(t *testing.T) {
 	if !strings.Contains(problem.Detail, "per key") {
 		t.Errorf("Detail = %q, want it to say the column is classified per key", problem.Detail)
 	}
+	// Refusing is only half an answer. The form that does work is the one the reader
+	// needs, and it is a rewrite of the line they already wrote.
+	if !strings.Contains(problem.Detail, "usermeta.meta_key=") {
+		t.Errorf("Detail = %q, want it to name the keyed form to write instead", problem.Detail)
+	}
+}
+
+// keyed is a table classified one Discriminator value at a time, which is the only shape
+// a keyed Approval can refer into.
+func keyed(keys map[string]config.Column) config.Table {
+	return config.Table{Discriminator: "meta_key", Value: "meta_value", Keys: keys}
+}
+
+// An Approval naming a key the file classifies `keep` is the whole point of the keyed
+// form, and says something. It is not a problem.
+func TestCheckAcceptsAnApprovalOfAKeptDiscriminatorValue(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": keyed(map[string]config.Column{"admin_color": {Action: config.Keep}}),
+	}, map[string]config.Environment{
+		"staging": {Anonymize: &config.EnvironmentAnonymize{
+			Approved: []config.ColumnRef{{Table: "usermeta", Column: "meta_key", Key: "admin_color"}},
+		}},
+	})
+
+	if problems := problemsOf(cfg, names(cfg)); len(problems) != 0 {
+		t.Errorf("problems = %v, want none — a keyed approval of a kept key says something", problems)
+	}
+}
+
+// Approval only means something beside `keep`, for a key exactly as for a column. An
+// approved fake key is still fabricated.
+func TestCheckSaysApprovingAFakedKeyMeansNothing(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": keyed(map[string]config.Column{"first_name": {Action: "fake.first_name"}}),
+	}, map[string]config.Environment{
+		"staging": {Anonymize: &config.EnvironmentAnonymize{
+			Approved: []config.ColumnRef{{Table: "usermeta", Column: "meta_key", Key: "first_name"}},
+		}},
+	})
+
+	problem := only(t, problemsOf(cfg, names(cfg)))
+
+	if !strings.Contains(problem.Detail, "fake.first_name") {
+		t.Errorf("Detail = %q, want it to name the classification that makes the approval inert", problem.Detail)
+	}
+}
+
+// A key nothing classifies is a decision about nothing. The value is still fabricated or
+// dropped by whatever answers for the rest of the table, and the approval reads in a diff
+// exactly like one that did something.
+func TestCheckSaysApprovingAnUnclassifiedKeyDecidesNothing(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": keyed(map[string]config.Column{"admin_color": {Action: config.Keep}}),
+	}, map[string]config.Environment{
+		"staging": {Anonymize: &config.EnvironmentAnonymize{
+			Approved: []config.ColumnRef{{Table: "usermeta", Column: "meta_key", Key: "billing_phone"}},
+		}},
+	})
+
+	problem := only(t, problemsOf(cfg, names(cfg)))
+
+	if !strings.Contains(problem.Detail, "billing_phone") {
+		t.Errorf("Detail = %q, want it to name the key nothing classifies", problem.Detail)
+	}
+}
+
+// A table has one Discriminator. A reference naming a different column selects for
+// nothing, and the table's real Discriminator is what the reader has to write instead.
+func TestCheckNamesTheDiscriminatorAKeyedApprovalGotWrong(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": keyed(map[string]config.Column{"admin_color": {Action: config.Keep}}),
+	}, map[string]config.Environment{
+		"staging": {Anonymize: &config.EnvironmentAnonymize{
+			Approved: []config.ColumnRef{{Table: "usermeta", Column: "meta_value", Key: "admin_color"}},
+		}},
+	})
+
+	problem := only(t, problemsOf(cfg, names(cfg)))
+
+	if !strings.Contains(problem.Detail, "meta_key") {
+		t.Errorf("Detail = %q, want it to name the table's actual discriminator", problem.Detail)
+	}
+}
+
+// A table that classifies no keys has no key to approve. Naming one reads like a
+// decision about a row that does not exist.
+func TestCheckSaysAKeyedApprovalNeedsADiscriminatedTable(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"users": columns(map[string]config.Column{"display_name": {Action: config.Keep}}),
+	}, map[string]config.Environment{
+		"staging": {Anonymize: &config.EnvironmentAnonymize{
+			Approved: []config.ColumnRef{{Table: "users", Column: "meta_key", Key: "admin_color"}},
+		}},
+	})
+
+	problem := only(t, problemsOf(cfg, names(cfg)))
+
+	if !strings.Contains(problem.Detail, "discriminator") {
+		t.Errorf("Detail = %q, want it to say the table has no discriminator", problem.Detail)
+	}
 }
 
 // Approval is the only part of the model that differs by destination, so it is the

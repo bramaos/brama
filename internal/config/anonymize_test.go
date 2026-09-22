@@ -320,6 +320,104 @@ func TestApprovedRejectsAnythingThatIsNotTableDotColumn(t *testing.T) {
 	}
 }
 
+// A Discriminator value is classified one key at a time, so it is approved one key at a
+// time. The reference names the Discriminator column and the value that selects for it,
+// which is the same pair `anonymize.tables.<table>.keys.<key>` is written under.
+func TestApprovedParsesADiscriminatorValue(t *testing.T) {
+	body := strings.Replace(valid,
+		"    url: https://example.com\n",
+		"    url: https://example.com\n    anonymize:\n      approved:\n        - usermeta.meta_key=admin_color\n", 1)
+	cfg := mustParse(t, body)
+
+	approved := cfg.Environments["production"].Anonymize.Approved
+	if len(approved) != 1 {
+		t.Fatalf("production approved = %v, want one entry", approved)
+	}
+	ref := approved[0]
+	if ref.Table != "usermeta" || ref.Column != "meta_key" || ref.Key != "admin_color" {
+		t.Errorf("approved[0] = %+v, want usermeta.meta_key=admin_color taken apart", ref)
+	}
+	if got := ref.String(); got != "usermeta.meta_key=admin_color" {
+		t.Errorf("String() = %q, want usermeta.meta_key=admin_color", got)
+	}
+}
+
+// A keyed Approval answers for its key and for nothing else. Approving one key must not
+// read as approving the column that holds every key's value, which is the whole reason
+// the key is spelled out.
+func TestApprovesRefMatchesAKeyedApprovalWholeAndNotInPart(t *testing.T) {
+	body := strings.Replace(valid,
+		"    url: https://example.local.test\n",
+		"    url: https://example.local.test\n    anonymize:\n      approved:\n        - usermeta.meta_key=admin_color\n", 1)
+	cfg := mustParse(t, body)
+
+	keyed := func(table, column, key string) config.ColumnRef {
+		return config.ColumnRef{Table: table, Column: column, Key: key}
+	}
+	local := cfg.Environments["local"]
+	if !local.ApprovesRef(keyed("usermeta", "meta_key", "admin_color")) {
+		t.Error("local should approve usermeta.meta_key=admin_color")
+	}
+	if local.ApprovesRef(keyed("usermeta", "meta_key", "wp_capabilities")) {
+		t.Error("approving one key should say nothing about another")
+	}
+	if local.ApprovesRef(keyed("other", "meta_key", "admin_color")) {
+		t.Error("approval is per table, not per key name")
+	}
+	// A table has one discriminator, so a reference naming another selects for nothing.
+	// Resolving it anyway would grant an exposure on the strength of a typo.
+	if local.ApprovesRef(keyed("usermeta", "meta_value", "admin_color")) {
+		t.Error("an approval naming the wrong discriminator should match nothing")
+	}
+	if local.Approves("usermeta", "meta_key") {
+		t.Error("a keyed approval should not approve the discriminator column")
+	}
+	if local.Approves("usermeta", "admin_color") {
+		t.Error("a keyed approval should not approve a column of the same name")
+	}
+	if cfg.Environments["production"].ApprovesRef(keyed("usermeta", "meta_key", "admin_color")) {
+		t.Error("an environment with no anonymize block should approve no key")
+	}
+}
+
+// A column Approval is not a keyed one. The two forms are distinct references, and
+// reading either as the other would approve by resemblance.
+func TestApprovesRefReadsAColumnApprovalAsNoKey(t *testing.T) {
+	body := strings.Replace(valid,
+		"    url: https://example.local.test\n",
+		"    url: https://example.local.test\n    anonymize:\n      approved:\n        - usermeta.meta_key\n", 1)
+	cfg := mustParse(t, body)
+
+	local := cfg.Environments["local"]
+	if !local.Approves("usermeta", "meta_key") {
+		t.Fatal("local should approve the column it names")
+	}
+	if local.ApprovesRef(config.ColumnRef{Table: "usermeta", Column: "meta_key", Key: "admin_color"}) {
+		t.Error("approving the discriminator column should approve none of its keys")
+	}
+}
+
+// Half a keyed reference is not a reference. An empty key would approve nothing in a
+// form that reads like it approves something, and the refusal has to say which half is
+// missing — the table.column one and the keyed one are different mistakes.
+func TestApprovedRejectsAHalfWrittenDiscriminatorValue(t *testing.T) {
+	for ref, want := range map[string]string{
+		"usermeta.meta_key=":    "table.column=key",
+		"usermeta.meta_key=a=b": "table.column=key",
+		"usermeta.=admin_color": "table.column reference",
+		".meta_key=admin_color": "table.column reference",
+	} {
+		body := strings.Replace(valid,
+			"    url: https://example.local.test\n",
+			"    url: https://example.local.test\n    anonymize:\n      approved:\n        - "+ref+"\n", 1)
+
+		err := parseErr(t, body)
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error for %q = %q, want it to name the %s form", ref, err, want)
+		}
+	}
+}
+
 // Approval is not cross-checked against `tables` here: a Preset supplies columns the
 // file never names, so a reference to one is legitimate. What it means is settled by
 // `anonymize check`, which has the Preset and the Schema; this is only its shape.

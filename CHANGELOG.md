@@ -20,6 +20,11 @@ See `docs/agents/changelog.md` for how entries are written.
   on the answer. It never falls back to `wp_`: a preset applied under a guessed prefix
   does not classify nothing — it classifies whatever table sorted into the accounts
   table's place. (#58, #7)
+- Approve one discriminator value, in `environments.<name>.anonymize.approved`:
+  `wp_usermeta.meta_key=admin_color` beside the `table.column` form. A key is classified
+  one at a time, so it is approved one at a time — approving the column holding its value
+  would approve every other key at once, which is why that is still refused. The
+  interactive review offers discriminator values like any other pending keep. (#59, #7)
 - Answer the pending half in a terminal. `brama anonymize review` now puts what only you
   can decide as a checklist — one per destination environment, one line per column — and
   the question it asks is "do you approve exposing this column as real data?" rather than
@@ -231,6 +236,10 @@ See `docs/agents/changelog.md` for how entries are written.
 - `brama` now exits `1` rather than `2` for an unknown command or a bad flag.
 - Error messages now name the step that failed: `reading brama.yaml: permission
   denied` rather than `permission denied`.
+- `brama anonymize check` now names the keyed form to write when an approval names a
+  discriminator or the column it selects for, instead of only refusing it. It also
+  reports a keyed approval naming a key nothing classifies, the wrong discriminator, or
+  a table with no discriminator at all. (#59, #7)
 
 ### Fixed
 
@@ -240,6 +249,10 @@ See `docs/agents/changelog.md` for how entries are written.
   in reach nothing narrows the count, because nothing knows what is there. (#58)
 - Report a failed write instead of finishing successfully, so a closed pipe or a full
   disk is no longer silent.
+- Let a stock WordPress project reach exit 0 on `brama anonymize review`. The eighteen
+  `wp_usermeta` keys the wordpress preset classifies `keep` could not be approved or
+  declined by anybody, so the run exited 42 on a project where every decision had been
+  made. (#59, #7)
 
 ### Security
 

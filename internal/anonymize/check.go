@@ -160,6 +160,7 @@ func checkApprovals(cfg *config.Config, environments []string, drift preset.Drif
 			}
 
 			column, classified := classificationOf(cfg.Anonymize, ref)
+			discriminator := discriminatorOf(cfg.Anonymize, ref.Table)
 			switch {
 			case classified && column.Action != config.Keep && drift.Tightened(ref.String()):
 				// The file classifies this `keep` and approves it, and a Preset brama
@@ -172,10 +173,23 @@ func checkApprovals(cfg *config.Config, environments []string, drift preset.Drif
 				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
 					"%s is classified %s, and approval only means something beside keep — "+
 						"an approved fake column is still fabricated", ref, column.Action)})
+			case !classified && ref.Keyed() && discriminator == "":
+				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
+					"%s names a key, and %s has no discriminator — nothing in it is classified "+
+						"per key, so there is no key here to approve", ref, ref.Table)})
+			case !classified && ref.Keyed() && discriminator != ref.Column:
+				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
+					"%s names %s as the discriminator, and %s's is %s — write %s.%s=%s",
+					ref, ref.Column, ref.Table, discriminator, ref.Table, discriminator, ref.Key)})
+			case !classified && ref.Keyed():
+				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
+					"%s is not a key this file classifies — approval names what to send as real "+
+						"data, and nothing here says what %s holds", ref, ref.Key)})
 			case !classified && discriminated(cfg.Anonymize, ref):
 				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
 					"%s is classified per key under keys, so approving the column says nothing "+
-						"about which keys it covers", ref)})
+						"about which keys it covers — name the key instead, as in %s.%s=<key>",
+					ref, ref.Table, discriminator)})
 			case !classified:
 				// Reached only after Resolve, so a Preset has already answered for
 				// every column it knows. A column still missing here is one nothing
@@ -201,9 +215,14 @@ type entry struct {
 	// back out of name.
 	table string
 	field string
-	// keyed says the entry is one Discriminator value rather than a column. An
-	// Approval names a `table.column` and so can never reach one: the column it would
-	// name holds every key's value at once, which is why approving it is refused.
+	// discriminator is the column whose value field is, for a keyed entry, and empty
+	// otherwise. An Approval of a Discriminator value names it, so what records one
+	// needs it carried rather than read back out of name.
+	discriminator string
+	// keyed says the entry is one Discriminator value rather than a column. It is
+	// approved by a `table.column=key` reference and never a `table.column` one: the
+	// column a bare reference would name holds every key's value at once, which is why
+	// approving that is still refused.
 	keyed  bool
 	column config.Column
 }
@@ -220,12 +239,13 @@ func entries(a *config.Anonymize) []entry {
 		t := a.Tables[table]
 		for _, key := range slices.Sorted(maps.Keys(t.Keys)) {
 			out = append(out, entry{
-				at:     at + ".keys." + key,
-				name:   table + "." + t.Discriminator + "=" + key,
-				table:  table,
-				field:  key,
-				keyed:  true,
-				column: t.Keys[key],
+				at:            at + ".keys." + key,
+				name:          table + "." + t.Discriminator + "=" + key,
+				table:         table,
+				field:         key,
+				discriminator: t.Discriminator,
+				keyed:         true,
+				column:        t.Keys[key],
 			})
 		}
 		for _, column := range slices.Sorted(maps.Keys(t.Columns)) {
@@ -241,14 +261,37 @@ func entries(a *config.Anonymize) []entry {
 	return out
 }
 
-// classificationOf returns what the file says about one column, and whether it says
-// anything at all.
+// classificationOf returns what the file says about one column or one Discriminator
+// value, and whether it says anything at all.
+//
+// A keyed reference is only answered by the table's own Discriminator. One naming a
+// different column selects for nothing, and reading it as though it named the right one
+// would approve a key on the strength of a line that does not say so.
 func classificationOf(a *config.Anonymize, ref config.ColumnRef) (config.Column, bool) {
 	if a == nil {
 		return config.Column{}, false
 	}
-	column, ok := a.Tables[ref.Table].Columns[ref.Column]
+	table := a.Tables[ref.Table]
+	if ref.Keyed() {
+		// A table with no Discriminator fails this too: a reference always names a
+		// column, so the empty string never matches one.
+		if table.Discriminator != ref.Column {
+			return config.Column{}, false
+		}
+		column, ok := table.Keys[ref.Key]
+		return column, ok
+	}
+	column, ok := table.Columns[ref.Column]
 	return column, ok
+}
+
+// discriminatorOf is the column whose value selects a Classification for a row of this
+// table, and empty for a table that classifies no keys.
+func discriminatorOf(a *config.Anonymize, table string) string {
+	if a == nil {
+		return ""
+	}
+	return a.Tables[table].Discriminator
 }
 
 // discriminated reports whether a reference names the structural half of a key/value

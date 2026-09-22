@@ -146,7 +146,7 @@ func (r *AnonymizeReviewResult) pendingNotes() []string {
 		notes = append(notes, fmt.Sprintf(
 			"%s classified keep and not approved %s — approval is per destination and only "+
 				"you grant one, so each is left exactly as the file has it:",
-			plural(len(keeps), "column"), whereItLands(len(keeps))))
+			keptCount(keeps), whereItLands(len(keeps))))
 		notes = append(notes, indentAll(fallbackNames(keeps))...)
 	}
 	return notes
@@ -457,11 +457,36 @@ func pendingDetail(review anonymize.Review) string {
 	held, keeps := len(review.Held), len(review.Unapproved)
 	switch {
 	case held == 0:
-		return fmt.Sprintf("%s classified keep that no destination approves", plural(keeps, "column"))
+		return fmt.Sprintf("%s classified keep that no destination approves", keptCount(review.Unapproved))
 	case keeps == 0:
 		return fmt.Sprintf("%s the preset would loosen, held for a human", plural(held, "column"))
 	default:
 		return fmt.Sprintf("%s classified keep that no destination approves, and %s the preset would loosen",
-			plural(keeps, "column"), plural(held, "column"))
+			keptCount(review.Unapproved), plural(held, "column"))
+	}
+}
+
+// keptCount names a set of pending keeps as what they are.
+//
+// A Discriminator value is not a column: it is one key under `keys`, and calling eighteen
+// of them "18 columns" sends the reader through `columns:` looking for eighteen entries
+// that are not there. The count is what somebody reads before deciding whether the run is
+// worth opening, so it has to survive being read on its own.
+func keptCount(keeps anonymize.Fallbacks) string {
+	var keys, columns int
+	for _, f := range keeps {
+		if f.Keyed() {
+			keys++
+			continue
+		}
+		columns++
+	}
+	switch {
+	case keys == 0:
+		return plural(columns, "column")
+	case columns == 0:
+		return plural(keys, "key")
+	default:
+		return plural(columns, "column") + " and " + plural(keys, "key")
 	}
 }

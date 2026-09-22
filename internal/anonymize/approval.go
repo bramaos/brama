@@ -35,14 +35,15 @@ type Fallback struct {
 	// again to get there is a parser for a format nobody defined.
 	Table string
 	Field string
-	// Keyed says the entry is one Discriminator value rather than a column.
+	// Discriminator is the column whose value Field is, and empty for an ordinary
+	// column. An Approval of a Discriminator value names it — `usermeta.meta_key=admin_color`
+	// — so recording one needs it, and reading it back out of Column would be a parser
+	// for a format nobody defined.
 	//
-	// It is the difference between a decision a person can answer here and one they
-	// cannot. An Approval names a `table.column`, and the column holding a Discriminator
-	// value holds every other key's value too — approving it would approve all of them
-	// at once, which is why `check` refuses the attempt rather than reading it
-	// generously.
-	Keyed bool
+	// It is also what makes this entry a keyed one, which is why Keyed is derived from
+	// it rather than stored beside it: two fields for one fact can disagree, and the one
+	// that would go stale here decides whether real values leave production.
+	Discriminator string
 	// Action is the Classification brama acts on in place of `keep` — always a
 	// `fake.<generator>`. Empty means no Generator claims the column and there is
 	// nothing to fall back to, which is the Refusal, not a quiet `drop`.
@@ -51,6 +52,23 @@ type Fallback struct {
 
 // Substituted reports whether a Generator stood in for the `keep`.
 func (f Fallback) Substituted() bool { return f.Action != "" }
+
+// Keyed reports whether this is one Discriminator value rather than a column.
+func (f Fallback) Keyed() bool { return f.Discriminator != "" }
+
+// Ref is the Approval that would resolve this fallback: `table.column` for a column, and
+// `table.discriminator=key` for a Discriminator value.
+//
+// One place builds it, so one place decides what approving this entry means. Spelling the
+// fork out at each call site instead is how a destination ends up approved by a reference
+// that names the wrong Discriminator — which resolves nothing, and would send real values
+// on the strength of a line `check` calls malformed.
+func (f Fallback) Ref() config.ColumnRef {
+	if f.Keyed() {
+		return config.ColumnRef{Table: f.Table, Column: f.Discriminator, Key: f.Field}
+	}
+	return config.ColumnRef{Table: f.Table, Column: f.Field}
+}
 
 func (f Fallback) String() string {
 	if f.Substituted() {
@@ -130,20 +148,20 @@ func Effective(cfg *config.Config, environments []string) Fallbacks {
 			if e.column.Action != config.Keep {
 				continue
 			}
-			// A Discriminator value is never approved, because an Approval names a
-			// `table.column` and the column holding these holds every other key's
-			// value too. Approving it would approve all of them at once, which is why
-			// Check refuses the attempt rather than reading it generously.
-			if !e.keyed && env.Approves(e.table, e.field) {
-				continue
-			}
-
 			fallback := Fallback{
-				Environment: name,
-				Column:      e.name,
-				Table:       e.table,
-				Field:       e.field,
-				Keyed:       e.keyed,
+				Environment:   name,
+				Column:        e.name,
+				Table:         e.table,
+				Field:         e.field,
+				Discriminator: e.discriminator,
+			}
+			// A Discriminator value is resolved against the Approval that names its key
+			// and never against one naming a column. The column holding these holds every
+			// other key's value too, so reading `usermeta.meta_value` as an answer about
+			// `admin_color` would approve every key at once — which is why Check refuses
+			// that form and says to name the key instead.
+			if env.ApprovesRef(fallback.Ref()) {
+				continue
 			}
 			// Claimed by name alone. The type half of a claim needs a Schema, and this
 			// has to answer on a CI runner with no route to a database — and where a

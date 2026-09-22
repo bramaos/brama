@@ -118,7 +118,11 @@ func askReview(ask asker, own *config.Config, review anonymize.Review, environme
 		granted := approval{environment: name}
 		for i, q := range questions {
 			for _, column := range q.columns {
-				at := column.Table + "." + column.Field
+				// Keyed by the printable name, which is the one thing unique across both
+				// forms: a table can hold a column and a Discriminator value under the
+				// same word, and counting them as one would let an answer about either
+				// stand in for the other.
+				at := column.Column
 				if _, seen := counted[at]; !seen {
 					counted[at] = &count{fallback: column}
 					order = append(order, at)
@@ -129,7 +133,7 @@ func askReview(ask asker, own *config.Config, review anonymize.Review, environme
 					continue
 				}
 				counted[at].approved++
-				granted.refs = append(granted.refs, config.ColumnRef{Table: column.Table, Column: column.Field})
+				granted.refs = append(granted.refs, column.Ref())
 			}
 		}
 		if len(granted.refs) > 0 {
@@ -183,7 +187,7 @@ func (c *count) declined(cfg *config.Config) (config.Amendment, bool) {
 		return config.Amendment{}, false
 	}
 	amendment := config.Amendment{Table: c.fallback.Table, Action: c.fallback.Action}
-	if c.fallback.Keyed {
+	if c.fallback.Keyed() {
 		amendment.Key = c.fallback.Field
 	} else {
 		amendment.Column = c.fallback.Field
@@ -195,7 +199,7 @@ func (c *count) declined(cfg *config.Config) (config.Amendment, bool) {
 // column's real values — including the ones this run was never asked about.
 func approvedAnywhere(cfg *config.Config, f anonymize.Fallback) bool {
 	for _, env := range cfg.Environments {
-		if env.Approves(f.Table, f.Field) {
+		if env.ApprovesRef(f.Ref()) {
 			return true
 		}
 	}
@@ -210,12 +214,9 @@ func environmentQuestions(own *config.Config, pending anonymize.Fallbacks) []que
 	var shipped anonymize.Fallbacks
 
 	for _, f := range pending {
-		// A Discriminator value is never approved — the column holding it holds every
-		// other key's value too — so there is no question here anybody could answer.
-		// It stays pending, and is named in the result like every other one.
-		if f.Keyed {
-			continue
-		}
+		// A Discriminator value is offered like any other pending keep. It is approved
+		// by its key — `wp_usermeta.meta_key=admin_color` — so ticking it answers for
+		// that key and for no other, which is a question somebody can answer.
 		if !classifiedInFile(own.Anonymize, f) {
 			shipped = append(shipped, f)
 			continue
@@ -273,7 +274,7 @@ func classifiedInFile(own *config.Anonymize, f anonymize.Fallback) bool {
 	if !known {
 		return false
 	}
-	if f.Keyed {
+	if f.Keyed() {
 		_, keyed := table.Keys[f.Field]
 		return keyed
 	}
