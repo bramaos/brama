@@ -40,3 +40,7 @@ The Go contract is `docs/agents/go.md`. `CLAUDE.md` imports it and the rules. If
 harness doesn't follow `@` imports, read both before writing Go. Topic depth (context,
 errors, concurrency, interfaces, packages, naming, doc comments, testing, modern Go) lives
 in `docs/agents/go/references/`.
+
+To add a command or change one's flags, arguments or output, follow the `go-cli` skill,
+`.claude/skills/go-cli/SKILL.md`: the procedure from file and registration to the
+rendered Result and `make check`.

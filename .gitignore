@@ -80,7 +80,7 @@ learn/
 
 # --- Editors & IDEs ----------------------------------------------------------
 .idea/
-.claude/
+.claude/*
 .vscode/
 *.swp
 *.swo
@@ -95,3 +95,10 @@ desktop.ini
 # brama.yaml is project config and is committed by design — it declares intent
 # (branches, targets, policies), it does not carry credentials.
 !brama.yaml
+
+# The go-* skills under .claude/skills/ are brama's own procedures for agents, named in
+# AGENTS.md, and are committed. The rest of .claude/ is per-machine: settings and
+# skills a developer installed for themselves.
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/go-*/
