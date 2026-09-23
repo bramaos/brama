@@ -26,6 +26,13 @@ updates:
     labels:
       - dependencies
       - github-actions
+    groups:
+      # The one exception to one pull request per action. codeql-action's init and
+      # analyze refuse to run at different versions, so bumped apart each pull
+      # request fails CI on its own.
+      codeql:
+        patterns:
+          - 'github/codeql-action*'
 
   - package-ecosystem: gomod
     directory: /
