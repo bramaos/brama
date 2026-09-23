@@ -44,6 +44,11 @@ type Fallback struct {
 	// it rather than stored beside it: two fields for one fact can disagree, and the one
 	// that would go stale here decides whether real values leave production.
 	Discriminator string
+	// Value is the column Discriminator selects for, and empty for an ordinary column.
+	// Recording this entry in a file that does not classify the table yet writes the
+	// table's `discriminator` and `value` with it, and neither can be inferred from a
+	// key.
+	Value string
 	// Action is the Classification brama acts on in place of `keep` — always a
 	// `fake.<generator>`. Empty means no Generator claims the column and there is
 	// nothing to fall back to, which is the Refusal, not a quiet `drop`.
@@ -154,6 +159,7 @@ func Effective(cfg *config.Config, environments []string) Fallbacks {
 				Table:         e.table,
 				Field:         e.field,
 				Discriminator: e.discriminator,
+				Value:         e.value,
 			}
 			// A Discriminator value is resolved against the Approval that names its key
 			// and never against one naming a column. The column holding these holds every

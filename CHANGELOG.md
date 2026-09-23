@@ -244,6 +244,23 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Changed
 
+- **BREAKING:** the `wordpress` preset classifies `wp_postmeta` and `wp_options` per key
+  instead of keeping `meta_value` and `option_value` whole. `meta_value` holds a thumbnail
+  ID and a cached oEmbed response at once, and `option_value` the site title and the mail
+  server's password at once, so one answer for either column was never the right one. Both
+  tables now name their discriminator, and the preset answers for core's own keys. A key a
+  plugin writes is unclassified and refuses the pull until your project says what it
+  holds. If you approved `wp_options.option_value` or `wp_postmeta.meta_value` for an
+  environment, `brama anonymize check` now refuses that line — approve the keys you mean
+  instead, as in `wp_options.option_name=mailserver_url`. (#70, #8)
+- Drop `_transient_*` and `_site_transient_*` from `wp_options`, and `_oembed_*` from
+  `wp_postmeta`. They are caches that regenerate on their own, and some hold a remote
+  response that brought personal data in with it. (#70, #8)
+- Classify the options holding a credential or a live address as what they are rather than
+  keeping them: `admin_email`, `new_admin_email` and `mailserver_login` are faked, and
+  `mailserver_pass`, `ftp_credentials` and `recovery_keys` are dropped. `siteurl` and
+  `home` are still kept — they are the site's own address, not a person's, and pointing
+  them at the destination is the pull's job. (#70, #8)
 - Add `shim_change`, `shim_previous_version` and `dry_run` to `brama server add
   --json`. `shim_version` is now the version the server runs when the command
   finishes, which under `--dry-run` is the one it was already running. (#4)
@@ -257,6 +274,10 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Fixed
 
+- Record a declined discriminator key in a table your `brama.yaml` does not classify yet,
+  writing the table's `discriminator` and `value` above it. `brama anonymize review` on a
+  WordPress project failed with "brama.yaml does not classify wp_options" instead of
+  writing the answer it had just been given. (#70, #8)
 - Stop `brama anonymize check` counting a preset table the database does not have. Where
   a schema was read, the counts are of the tables that schema has, so a project the
   preset half-fits no longer reads as one with twelve tables classified. With no schema

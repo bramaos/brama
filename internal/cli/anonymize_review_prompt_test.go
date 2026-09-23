@@ -412,6 +412,36 @@ func TestReviewDoesNotHandBackTheDeclineItJustRecorded(t *testing.T) {
 	}
 }
 
+// Declining a preset-kept discriminator value writes the key, and the table it belongs
+// to, into a file that classified neither. `wp_options.option_name=mailserver_url` is the
+// case on a stock WordPress project: the preset keeps it, a generator claims it by name,
+// and the file has no `wp_options` entry for the key to go under.
+func TestReviewWritesADeclinedKeyIntoATableTheFileDoesNotClassify(t *testing.T) {
+	root := classifiedProject(t, `anonymize:
+  preset: wordpress
+  tables:
+    users:
+      columns:
+        email:
+          action: fake.email
+`)
+	env, _, _ := testEnv()
+	env.Ask = nobodyTicks().ask
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", unreachable); err == nil {
+		t.Fatal("runAnonymizeReview() = nil, want the keeps nothing claims still pending")
+	}
+
+	options := written(t, root).Anonymize.Tables["wp_options"]
+	if options.Discriminator != "option_name" || options.Value != "option_value" {
+		t.Fatalf("wp_options discriminator/value = %q/%q, want the table written so its keys mean something",
+			options.Discriminator, options.Value)
+	}
+	if got := options.Keys["mailserver_url"].Action; got != "fake.url" {
+		t.Errorf("wp_options.option_name=mailserver_url = %q, want the decline written", got)
+	}
+}
+
 // With nobody there the behaviour is the one that was there before this existed: nothing
 // is asked, nothing is approved, and the run hands the decisions back.
 func TestReviewWithNobodyThereAsksNothing(t *testing.T) {

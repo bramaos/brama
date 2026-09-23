@@ -115,11 +115,11 @@ func TestResolveGrantsNoApprovalForAPresetsKeep(t *testing.T) {
 
 	// A column the preset classifies `keep` — real production data at any destination
 	// that is allowed to receive it.
-	if got := out.Anonymize.Tables["wp_options"].Columns["option_value"].Action; got != config.Keep {
-		t.Fatalf("wp_options.option_value = %q, want the preset to keep it", got)
+	if got := out.Anonymize.Tables["wp_posts"].Columns["post_content"].Action; got != config.Keep {
+		t.Fatalf("wp_posts.post_content = %q, want the preset to keep it", got)
 	}
 	for name, env := range out.Environments {
-		if env.Approves("wp_options", "option_value") {
+		if env.Approves("wp_posts", "post_content") {
 			t.Errorf("%s approves a column only the preset kept — a preset grants no approval", name)
 		}
 	}

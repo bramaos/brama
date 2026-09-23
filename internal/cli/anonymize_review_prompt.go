@@ -188,7 +188,11 @@ func (c *count) declined(cfg *config.Config) (config.Amendment, bool) {
 	}
 	amendment := config.Amendment{Table: c.fallback.Table, Action: c.fallback.Action}
 	if c.fallback.Keyed() {
+		// The table's own two facts travel with the key, so recording it in a file that
+		// classifies the table nowhere yet writes a table brama can read back.
 		amendment.Key = c.fallback.Field
+		amendment.Discriminator = c.fallback.Discriminator
+		amendment.Value = c.fallback.Value
 	} else {
 		amendment.Column = c.fallback.Field
 	}
