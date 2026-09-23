@@ -59,6 +59,8 @@ _Avoid_: dummy, stub, mock, fixture
 The structure of an Environment's database — its tables, their columns, the types and
 constraints on those columns, and the foreign keys between them. Never any rows: a Schema is
 what Classification is decided against, and deciding must not require reading production data.
+The one exception is a Discriminator's distinct values, which a key/value table's
+Classification is decided against in the Schema's place; never the values they select.
 _Avoid_: structure, catalog, metadata, DDL
 
 **Introspection**:
@@ -99,7 +101,8 @@ _Avoid_: link, alias, identity map, seed
 
 **Approval**:
 An Environment's permission to receive the real values of a `keep` column, or of one
-Discriminator value — `users.display_name`, or `wp_usermeta.meta_key=admin_color`. Distinct
+Discriminator value or prefix — `users.display_name`, `wp_usermeta.meta_key=admin_color`,
+or `wp_options.option_name=_transient_*`. Distinct
 from Classification: Classification settles what a column means, Approval settles where its
 real values may go. Only a human grants one. It addresses exactly what Classification
 addresses, so an answer is never broader than the question it answers.
@@ -120,7 +123,12 @@ _Avoid_: default, downgrade, override, redaction
 **Discriminator**:
 The column whose value selects which Classification applies to a row, for tables that
 store many kinds of value in one column — `wp_usermeta.meta_key`. The column it selects
-*for* is named beside it as the table's `value` — `wp_usermeta.meta_value`.
+*for* is named beside it as the table's `value` — `wp_usermeta.meta_value`. A
+Discriminator value is classified by its exact name, or by a prefix ending in `*` —
+`_transient_*` — with the longest match winning. The Discriminator itself is never
+classified: it names a kind of value, not a person, and travels as it is. A dropped
+Discriminator value travels as no row at all. A row with no Discriminator value, NULL or
+empty, has the empty one, `""`, and is classified like any other.
 _Avoid_: key column, EAV key, type column
 
 **Preset**:
@@ -131,7 +139,8 @@ _Avoid_: template, profile, defaults
 
 **Table prefix**:
 What a project's own tables are named with — WordPress spells it `$table_prefix`, and `wp_`
-is only its most common value. A Preset knows which tables a framework creates and not what
+is only its most common value. Some Discriminator values carry it too — `wp_capabilities`
+is `$table_prefix` + `capabilities`. A Preset knows which tables a framework creates and not what
 this install calls them, so the prefix is read out of the project's own config by its
 Adapter, every time a Preset is resolved, and is never recorded in `brama.yaml`. One Brama
 cannot determine is a Refusal: a Preset applied under a guessed prefix classifies whatever
