@@ -22,8 +22,9 @@ type Review struct {
 	// already — Resolve applies them in memory on every run — and writing them down is
 	// what stops brama.yaml saying `keep` about a column brama fabricates.
 	Tightenings preset.Drifts
-	// New are the columns the Schema has, the file did not, and a Generator claims.
-	// Same lane as a tightening: nothing is widened, and it lands in `git diff`.
+	// New are the columns and Discriminator values the Schema has, the file did not,
+	// and a Generator claims. Same lane as a tightening: nothing is widened, and it
+	// lands in `git diff`.
 	New []config.TableClassification
 	// Held are the Preset answers looser than the file's, which never apply on their
 	// own.
@@ -46,14 +47,20 @@ type Review struct {
 	// `keep` anybody has to approve either, so answering it is the interactive
 	// review's, not this one's.
 	Unclassified []Uncovered
+	// UnclassifiedKeys are the Discriminator values the Schema holds that nothing
+	// classifies and no Generator claims. Unlike a column, a key is pending. `check`
+	// refuses on one, and the keys a plugin writes are exactly where a customer's
+	// billing email turns up, so the run hands them back until a person answers for
+	// each one.
+	UnclassifiedKeys []UncoveredKey
 }
 
 // Plan divides one project's state into the two lanes.
 //
 // resolved is the config with its Preset read in, and drift the disagreement Resolve
 // reported on the way. coverage is the comparison against a Schema, and nil where no
-// Environment was reachable — which leaves New and Unclassified empty rather than
-// guessing that a database brama could not read has nothing new in it.
+// Environment was reachable — which leaves New and both Unclassified lists empty rather
+// than guessing that a database brama could not read has nothing new in it.
 func Plan(resolved *config.Config, drift preset.Drifts, environments []string, coverage *Coverage) Review {
 	review := Review{
 		Tightenings: drift.Applied(),
@@ -63,6 +70,7 @@ func Plan(resolved *config.Config, drift preset.Drifts, environments []string, c
 	if coverage != nil {
 		review.New = Bootstrap(*coverage)
 		review.Unclassified = Unclaimed(*coverage, review.New)
+		review.UnclassifiedKeys = UnclaimedKeys(*coverage, review.New)
 	}
 	return review
 }
@@ -71,15 +79,17 @@ func Plan(resolved *config.Config, drift preset.Drifts, environments []string, c
 // only question a CI runner has to ask.
 //
 // Unclassified columns are not among them. A pull refuses on one either way, and that is
-// reported; what makes these two pending is that `review` is the command that answers
+// reported; what makes the rest pending is that `review` is the command that answers
 // them and this run could not.
-func (r Review) Pending() bool { return len(r.Held) > 0 || len(r.Unapproved) > 0 }
+func (r Review) Pending() bool {
+	return len(r.Held) > 0 || len(r.Unapproved) > 0 || len(r.UnclassifiedKeys) > 0
+}
 
 // Amendments is the automatic half as config writes it, in the order it is applied:
 // what a Preset changed about columns the file already answers for, then what a
 // migration added.
 func (r Review) Amendments() []config.Amendment {
-	out := make([]config.Amendment, 0, len(r.Tightenings)+Claimed(r.New))
+	out := make([]config.Amendment, 0, r.Automatic())
 	for _, d := range r.Tightenings {
 		out = append(out, config.Amendment{
 			Table:  d.Table,
@@ -101,11 +111,20 @@ func (r Review) Amendments() []config.Amendment {
 				Declared: c.Declared,
 			})
 		}
+		for _, k := range t.Keys {
+			out = append(out, config.Amendment{
+				Table:         t.Name,
+				Key:           k.Name,
+				Discriminator: t.Discriminator,
+				Value:         t.Value,
+				Action:        k.Action,
+			})
+		}
 	}
 	return out
 }
 
-// Automatic is how many columns this run wrote for. A tightening and a new column are
-// one line of the file each, and they are counted together because the person reading
-// is about to read one diff, not two.
-func (r Review) Automatic() int { return len(r.Tightenings) + Claimed(r.New) }
+// Automatic is how many entries this run wrote. A tightening, a new column and a new key
+// are one entry of the file each, and they are counted together because the person
+// reading is about to read one diff, not three.
+func (r Review) Automatic() int { return len(r.Tightenings) + Claimed(r.New) + ClaimedKeys(r.New) }

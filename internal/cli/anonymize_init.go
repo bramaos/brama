@@ -36,7 +36,10 @@ type AnonymizeInitResult struct {
 	Tables []config.TableClassification
 	// Unclassified are the columns no Generator claimed, left out of the file.
 	Unclassified []anonymize.Uncovered
-	DryRun       bool
+	// UnclassifiedKeys are the Discriminator values no Generator claimed, left out the
+	// same way.
+	UnclassifiedKeys []anonymize.UncoveredKey
+	DryRun           bool
 }
 
 func (r *AnonymizeInitResult) Action() string { return "anonymize_init" }
@@ -44,15 +47,15 @@ func (r *AnonymizeInitResult) Action() string { return "anonymize_init" }
 // Status is partial while anything is still Unclassified, because a Pull still refuses.
 // `init` bootstraps a classification; it does not finish one.
 func (r *AnonymizeInitResult) Status() renderer.Status {
-	if len(r.Unclassified) > 0 {
+	if r.left() > 0 {
 		return renderer.StatusPartial
 	}
 	return renderer.StatusSuccess
 }
 
 func (r *AnonymizeInitResult) Headline() string {
-	wrote := fmt.Sprintf("%s in %s",
-		plural(anonymize.Claimed(r.Tables), "column"), plural(len(r.Tables), "table"))
+	wrote := fmt.Sprintf("%s in %s", entries(anonymize.Claimed(r.Tables), anonymize.ClaimedKeys(r.Tables)),
+		plural(len(r.Tables), "table"))
 	if r.Preset != "" {
 		wrote = fmt.Sprintf("%s beyond the %s preset's %s",
 			wrote, r.Preset, plural(r.Covered, "column"))
@@ -62,9 +65,9 @@ func (r *AnonymizeInitResult) Headline() string {
 	case r.DryRun:
 		return fmt.Sprintf("dry run — %s would be classified from %s, and nothing was written",
 			wrote, r.SchemaFrom)
-	case len(r.Unclassified) > 0:
+	case r.left() > 0:
 		return fmt.Sprintf("classified %s from %s — %s left for you to decide",
-			wrote, r.SchemaFrom, plural(len(r.Unclassified), "column"))
+			wrote, r.SchemaFrom, entries(len(r.Unclassified), len(r.UnclassifiedKeys)))
 	default:
 		return fmt.Sprintf("classified %s from %s — next: brama anonymize check", wrote, r.SchemaFrom)
 	}
@@ -76,14 +79,17 @@ func (r *AnonymizeInitResult) Headline() string {
 // them, and a number is not something anyone can act on — these are the review items,
 // and they are the reason a Pull still refuses.
 func (r *AnonymizeInitResult) Notes() []string {
-	if len(r.Unclassified) == 0 {
+	if r.left() == 0 {
 		return nil
 	}
-	return append(
-		[]string{"no generator claimed these, so they are left out of the file and " +
-			"unclassified — a pull refuses until each one is decided with brama anonymize review:"},
-		uncoveredNames(r.Unclassified)...)
+	notes := []string{"no generator claimed these, so they are left out of the file and " +
+		"unclassified — a pull refuses until each one is decided with brama anonymize review:"}
+	notes = append(notes, uncoveredNames(r.Unclassified)...)
+	return append(notes, indentAll(keyNames(r.UnclassifiedKeys))...)
 }
+
+// left is how many columns and keys this run left Unclassified.
+func (r *AnonymizeInitResult) left() int { return len(r.Unclassified) + len(r.UnclassifiedKeys) }
 
 func (r *AnonymizeInitResult) Fields() []renderer.Field {
 	return renderer.Fields{}.
@@ -94,6 +100,8 @@ func (r *AnonymizeInitResult) Fields() []renderer.Field {
 		Add("tables", "Tables", len(r.Tables)).
 		Add("columns", "Columns classified", anonymize.Claimed(r.Tables)).
 		Add("unclassified_columns", "Left unclassified", len(r.Unclassified)).
+		Add("keys", "Keys classified", anonymize.ClaimedKeys(r.Tables)).
+		Add("unclassified_keys", "Keys left unclassified", len(r.UnclassifiedKeys)).
 		Add("dry_run", "Dry run", r.DryRun)
 }
 
@@ -108,7 +116,8 @@ func newAnonymizeInitCmd(env *console) *cobra.Command {
 		Short: "Bootstrap the classification in brama.yaml from a database schema",
 		Long: "Read an environment's schema and write an anonymize block classifying the columns\n" +
 			"brama recognises: a column a generator declares a claim on — by name and by type —\n" +
-			"becomes `action: fake.<generator>`.\n\n" +
+			"becomes `action: fake.<generator>`. A key/value table's keys are read too, and a\n" +
+			"key is classified exactly as a column is, always by its exact name.\n\n" +
 			"Where brama ships a preset for this project's adapter, the block references it by\n" +
 			"name instead of expanding it, and the tables it already knows are not written out\n" +
 			"again. The file stays short, and a preset brama tightens reaches this project\n" +
@@ -197,9 +206,9 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 		named = shipped.Name
 	}
 
-	// No Discriminator values: init classifies columns, and the keys of a table the
-	// Preset keys are `check`'s to read, where they refuse.
-	read, from, err := readSchema(ctx, cfg, environments, source, nil)
+	// The keys of each table the Preset keys are read with the Schema, and classified the
+	// way its columns are. They are the only rows init reads (ADR 0017).
+	read, from, err := readSchema(ctx, cfg, environments, source, discriminators(start))
 	if err != nil {
 		return err
 	}
@@ -256,10 +265,11 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 		// What the Preset answered for is what the schema has and Cover did not report
 		// back — derived from the same comparison rather than counted separately, so
 		// the two halves of the report cannot disagree about which columns those are.
-		Covered:      coverage.Columns - len(coverage.Unclassified),
-		Tables:       tables,
-		Unclassified: anonymize.Unclaimed(coverage, tables),
-		DryRun:       dryRun,
+		Covered:          coverage.Columns - len(coverage.Unclassified),
+		Tables:           tables,
+		Unclassified:     anonymize.Unclaimed(coverage, tables),
+		UnclassifiedKeys: anonymize.UnclaimedKeys(coverage, tables),
+		DryRun:           dryRun,
 	}
 	if err := env.Renderer.Result(result); err != nil {
 		return fmt.Errorf("rendering the init result: %w", err)

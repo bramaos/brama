@@ -8,6 +8,7 @@ import (
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/prompt"
 	"github.com/bramaos/brama/internal/refusal"
+	"github.com/bramaos/brama/internal/schema"
 )
 
 // kept is a classification the project wrote itself: one `keep` no destination approves,
@@ -494,5 +495,105 @@ func TestPendingNamesKeysAsKeysAndColumnsAsColumns(t *testing.T) {
 				t.Errorf("keptCount() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A key nothing classifies is offered like any other pending entry: on each
+// destination's list, where ticking it approves exposing it as real data. The file then
+// keeps the key, and that destination alone approves it.
+func TestReviewOffersAKeyNothingClassifies(t *testing.T) {
+	root := classifiedProject(t, keyedSettled)
+	env, _, _ := testEnv()
+	a := &answered{tick: func(title string, item prompt.Item) bool {
+		return strings.Contains(title, "`local`") && strings.Contains(item.Label, "stripe_customer_id")
+	}}
+	env.Ask = a.ask
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", settledKeys()); err == nil {
+		t.Fatal("runAnonymizeReview() = nil, want staging still waiting on the key")
+	}
+
+	if len(a.titles) != 2 {
+		t.Errorf("asked %v, want one list per destination", a.titles)
+	}
+	cfg := written(t, root)
+	if got := cfg.Anonymize.Tables["usermeta"].Keys["stripe_customer_id"].Action; got != config.Keep {
+		t.Errorf("usermeta keys stripe_customer_id = %q, want keep", got)
+	}
+	ref := config.ColumnRef{Table: "usermeta", Column: "meta_key", Key: "stripe_customer_id"}
+	if !cfg.Environments["local"].ApprovesRef(ref) {
+		t.Error("local does not approve the key, which is what was ticked")
+	}
+	if cfg.Environments["staging"].ApprovesRef(ref) {
+		t.Error("staging approves the key, which nobody granted it")
+	}
+}
+
+// Declining a key nothing claims has no answer to write: it stays Unclassified, and the
+// run still hands it back.
+func TestReviewLeavesADeclinedKeyUnclassified(t *testing.T) {
+	root := classifiedProject(t, keyedSettled)
+	env, _, _ := testEnv()
+	a := nobodyTicks()
+	env.Ask = a.ask
+
+	r := refused(t, runAnonymizeReview(t.Context(), env, root, "", settledKeys()))
+
+	if r.Reason != refusal.ReviewRequired {
+		t.Errorf("reason = %q, want review_required", r.Reason)
+	}
+	if _, ok := written(t, root).Anonymize.Tables["usermeta"].Keys["stripe_customer_id"]; ok {
+		t.Error("a declined key was written, want it left unclassified")
+	}
+	offered := false
+	for _, item := range a.everything() {
+		offered = offered || item.Label == "usermeta.meta_key='stripe_customer_id'"
+	}
+	if !offered {
+		t.Errorf("the key was never offered: %+v", a.everything())
+	}
+}
+
+// Approved at every destination, a key nothing claimed is decided, and the run exits 0.
+func TestReviewExitsZeroOnceEveryKeyIsDecided(t *testing.T) {
+	root := classifiedProject(t, keyedSettled)
+	env, _, _ := testEnv()
+	env.Ask = (&answered{tick: func(string, prompt.Item) bool { return true }}).ask
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", settledKeys()); err != nil {
+		t.Fatalf("runAnonymizeReview() = %v, want success — the key was approved everywhere", err)
+	}
+	if err := runAnonymizeCheck(t.Context(), env, root, "", settledKeys()); err != nil {
+		t.Errorf("runAnonymizeCheck() after review = %v, want every key classified", err)
+	}
+}
+
+// A key holding a `*` cannot be written as its own entry: `foo*` is a prefix covering every
+// key starting with foo. It is not offered, and stays handed back for a person to decide in
+// the file.
+func TestReviewDoesNotOfferAKeyTheFileCannotName(t *testing.T) {
+	root := classifiedProject(t, keyedSettled)
+	env, _, _ := testEnv()
+	a := &answered{tick: func(string, prompt.Item) bool { return true }}
+	env.Ask = a.ask
+	s := settledSchema()
+	s.Tables = append(s.Tables, schema.Table{Name: "usermeta", Columns: []schema.Column{
+		{Name: "meta_key", Type: "varchar", Declared: "varchar(255)", Length: 255},
+		{Name: "meta_value", Type: "longtext", Declared: "longtext"},
+	}})
+	source := withKeys("staging", s, map[string][]string{"usermeta": {"foo*"}})
+
+	r := refused(t, runAnonymizeReview(t.Context(), env, root, "", source))
+
+	if r.Reason != refusal.ReviewRequired {
+		t.Errorf("reason = %q, want review_required", r.Reason)
+	}
+	for _, item := range a.everything() {
+		if strings.Contains(item.Label, "foo*") {
+			t.Errorf("offered %q, want a key the file cannot name left out", item.Label)
+		}
+	}
+	if keys := written(t, root).Anonymize.Tables["usermeta"].Keys; len(keys) != 1 {
+		t.Errorf("usermeta keys = %v, want nickname alone", keys)
 	}
 }

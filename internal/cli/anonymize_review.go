@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -98,7 +99,7 @@ func (r *AnonymizeReviewResult) Headline() string {
 // Decisions, not columns. Approval is per destination, so one `keep` column that lands
 // at two Environments is two questions, and neither answers the other.
 func (r *AnonymizeReviewResult) pending() int {
-	return len(r.Review.Held) + len(r.Review.Unapproved)
+	return len(r.Review.Held) + len(r.Review.Unapproved) + len(r.Review.UnclassifiedKeys)
 }
 
 // Notes name every column in both lanes.
@@ -129,6 +130,13 @@ func (r *AnonymizeReviewResult) automaticNotes() []string {
 			plural(added, "column"), r.SchemaFrom, filepath.Base(r.Path)))
 		notes = append(notes, indentAll(newColumnNames(r.Review.New))...)
 	}
+	if added := anonymize.ClaimedKeys(r.Review.New); added > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"%s %s holds that %s did not classify, each classified by the generator that "+
+				"declares a claim on its name — written, and visible in the diff:",
+			plural(added, "key"), r.SchemaFrom, filepath.Base(r.Path)))
+		notes = append(notes, indentAll(newKeyNames(r.Review.New))...)
+	}
 	return notes
 }
 
@@ -148,6 +156,13 @@ func (r *AnonymizeReviewResult) pendingNotes() []string {
 				"you grant one, so each is left exactly as the file has it:",
 			keptCount(keeps), whereItLands(len(keeps))))
 		notes = append(notes, indentAll(fallbackNames(keeps))...)
+	}
+	if keys := r.Review.UnclassifiedKeys; len(keys) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"%s %s holds that nothing classifies and no generator claims — what each one "+
+				"holds is yours to say, so none was written, and a pull refuses until each is decided:",
+			plural(len(keys), "key"), r.SchemaFrom))
+		notes = append(notes, indentAll(keyNames(keys))...)
 	}
 	return notes
 }
@@ -186,7 +201,7 @@ func (r *AnonymizeReviewResult) Fields() []renderer.Field {
 		Add("pending_decisions", "Left for you", r.pending()).
 		Add("unclassified_columns", "Unclassified", len(r.Review.Unclassified)).
 		AddOptional("reason", "Exit", reason, "nothing pending").
-		// Four lists, never merged. Two of them are what brama did and two are what it
+		// Six lists, never merged. Two of them are what brama did and two are what it
 		// declined to do, and a caller gating a release on the wrong key would be gating
 		// it on work that is already finished.
 		//
@@ -196,8 +211,10 @@ func (r *AnonymizeReviewResult) Fields() []renderer.Field {
 		// prose that does not wrap off the screen at ten of them.
 		AddContractOnly("applied_preset_tightenings", driftNames(r.Review.Tightenings)).
 		AddContractOnly("applied_new_columns", newColumnNames(r.Review.New)).
+		AddContractOnly("applied_new_keys", newKeyNames(r.Review.New)).
 		AddContractOnly("pending_preset_loosenings", driftNames(r.Review.Held)).
-		AddContractOnly("pending_keeps", fallbackNames(r.Review.Unapproved))
+		AddContractOnly("pending_keeps", fallbackNames(r.Review.Unapproved)).
+		AddContractOnly("pending_unclassified_keys", keyNames(r.Review.UnclassifiedKeys))
 }
 
 // newColumnNames is one line a column — `orders.billing_email → fake.email` — in the
@@ -212,6 +229,19 @@ func newColumnNames(tables []config.TableClassification) []string {
 	return out
 }
 
+// newKeyNames is one line a key — `usermeta.meta_key='billing_email' → fake.email` —
+// spelled the way `check` names the key it refuses.
+func newKeyNames(tables []config.TableClassification) []string {
+	out := make([]string, 0, anonymize.ClaimedKeys(tables))
+	for _, t := range tables {
+		for _, k := range t.Keys {
+			key := anonymize.UncoveredKey{Table: t.Name, Discriminator: t.Discriminator, Value: k.Name}
+			out = append(out, key.String()+" → "+string(k.Action))
+		}
+	}
+	return out
+}
+
 func newAnonymizeReviewCmd(env *console) *cobra.Command {
 	var only string
 
@@ -221,12 +251,12 @@ func newAnonymizeReviewCmd(env *console) *cobra.Command {
 		Long: "Bring brama.yaml back into agreement with what brama would actually do, and name\n" +
 			"what it will not do on its own.\n\n" +
 			"Two lanes, and they are not the same lane. A preset that classifies a column more\n" +
-			"strictly than the file does, and a column a migration added that a generator\n" +
-			"claims, both narrow what leaves production: they need nobody's approval, they are\n" +
-			"applied, and they are listed so that nothing lands invisibly.\n\n" +
-			"A preset that classifies a column less strictly, and a kept column the destination\n" +
-			"has not approved, both widen it. Those are decisions, only a human makes one, and\n" +
-			"this command makes none of them on its own.\n\n" +
+			"strictly than the file does, and a column or key a migration or plugin added that a\n" +
+			"generator claims, all narrow what leaves production: they need nobody's approval,\n" +
+			"they are applied, and they are listed so that nothing lands invisibly.\n\n" +
+			"A preset that classifies a column less strictly, a kept column the destination has\n" +
+			"not approved, and a key nothing classifies all widen it or leave it open. Those are\n" +
+			"decisions, only a human makes one, and this command makes none of them on its own.\n\n" +
 			"In a terminal it asks. One checklist per destination, one line per column, and each\n" +
 			"line shows the classification that stands if you leave it unticked — so declining is\n" +
 			"never a leap. Ticking records an approval for that destination; declining writes the\n" +
@@ -416,8 +446,8 @@ const reviewInATerminal = "brama anonymize review    (in a terminal)"
 
 // editTheFile is the way forward out of an interactive one. The questions have been
 // asked, so pointing at the terminal again would point at the run that just happened —
-// what is left is a discriminator key nothing can approve, or a column no generator
-// claims, and both are edits somebody makes in the file.
+// what is left is a key somebody declined with nothing to fall back on, or a column no
+// generator claims, and both are edits somebody makes in the file.
 const editTheFile = "decide the rest in " + config.Filename
 
 // applyReview writes the automatic half, and reports whether the file changed.
@@ -454,39 +484,31 @@ func applyReview(path string, review anonymize.Review) (bool, error) {
 // pendingDetail is the Refusal's own account of what is left, for the one caller that
 // reads an error string rather than the contract.
 func pendingDetail(review anonymize.Review) string {
-	held, keeps := len(review.Held), len(review.Unapproved)
-	switch {
-	case held == 0:
-		return fmt.Sprintf("%s classified keep that no destination approves", keptCount(review.Unapproved))
-	case keeps == 0:
-		return fmt.Sprintf("%s the preset would loosen, held for a human", plural(held, "column"))
-	default:
-		return fmt.Sprintf("%s classified keep that no destination approves, and %s the preset would loosen",
-			keptCount(review.Unapproved), plural(held, "column"))
+	var parts []string
+	if keeps := review.Unapproved; len(keeps) > 0 {
+		parts = append(parts, keptCount(keeps)+" classified keep that no destination approves")
 	}
+	if keys := len(review.UnclassifiedKeys); keys > 0 {
+		parts = append(parts, plural(keys, "key")+" nothing classifies")
+	}
+	if held := len(review.Held); held > 0 {
+		parts = append(parts, plural(held, "column")+" the preset would loosen, held for a human")
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1]
 }
 
-// keptCount names a set of pending keeps as what they are.
-//
-// A Discriminator value is not a column: it is one key under `keys`, and calling eighteen
-// of them "18 columns" sends the reader through `columns:` looking for eighteen entries
-// that are not there. The count is what somebody reads before deciding whether the run is
-// worth opening, so it has to survive being read on its own.
+// keptCount names a set of pending keeps as what they are, keys apart from columns. The
+// count is what somebody reads before deciding whether the run is worth opening, so it
+// has to survive being read on its own.
 func keptCount(keeps anonymize.Fallbacks) string {
-	var keys, columns int
+	var keys int
 	for _, f := range keeps {
 		if f.Keyed() {
 			keys++
-			continue
 		}
-		columns++
 	}
-	switch {
-	case keys == 0:
-		return plural(columns, "column")
-	case columns == 0:
-		return plural(keys, "key")
-	default:
-		return plural(columns, "column") + " and " + plural(keys, "key")
-	}
+	return entries(len(keeps)-keys, keys)
 }

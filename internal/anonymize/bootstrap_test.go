@@ -1,6 +1,7 @@
 package anonymize
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -145,5 +146,67 @@ func TestBootstrapCarriesTheDeclaredType(t *testing.T) {
 
 	if len(tables) != 1 || !strings.Contains(tables[0].Columns[0].Declared, "varchar(100)") {
 		t.Errorf("tables = %v, want the declared type carried through", tables)
+	}
+}
+
+// usermeta is a key/value table the Classification keys by meta_key, holding the keys
+// read off it and none of them classified.
+func usermeta(value schema.Column, keys ...string) (*config.Anonymize, schema.Schema) {
+	a := &config.Anonymize{Tables: map[string]config.Table{"usermeta": {
+		Discriminator: "meta_key", Value: value.Name,
+		Keys: map[string]config.Column{"nickname": {Action: "fake.username"}},
+	}}}
+	s := schema.Schema{Tables: []schema.Table{{
+		Name:          "usermeta",
+		Columns:       []schema.Column{text("meta_key", "varchar(255)", 255), value},
+		Discriminator: schema.Discriminator{Column: "meta_key", Values: keys},
+	}}}
+	return a, s
+}
+
+// A discovered key is classified exactly as a column is: written where a Generator
+// claims it by name, and left out, Unclassified, where none does.
+func TestBootstrapClassifiesAKeyAsItDoesAColumn(t *testing.T) {
+	a, s := usermeta(schema.Column{Name: "meta_value", Type: "longtext", Declared: "longtext"},
+		"", "billing_email", "nickname", "stripe_customer_id")
+	coverage, problems := Cover(a, s)
+	if len(problems) > 0 {
+		t.Fatalf("Cover() problems = %v, want none", problems)
+	}
+
+	tables := Bootstrap(coverage)
+
+	want := []config.TableClassification{{
+		Name: "usermeta", Discriminator: "meta_key", Value: "meta_value",
+		Keys: []config.ColumnClassification{{Name: "billing_email", Action: "fake.email"}},
+	}}
+	if !reflect.DeepEqual(tables, want) {
+		t.Errorf("Bootstrap() = %+v, want %+v", tables, want)
+	}
+	left := UnclaimedKeys(coverage, tables)
+	if len(left) != 2 || left[0].Value != "" || left[1].Value != "stripe_customer_id" {
+		t.Errorf("UnclaimedKeys() = %+v, want the empty key and stripe_customer_id", left)
+	}
+}
+
+// The value column is what a key's Generator fills, so a claim on the name alone is half
+// a claim. A column too short for an address leaves billing_email Unclassified.
+func TestBootstrapLeavesAKeyItsGeneratorCannotFill(t *testing.T) {
+	a, s := usermeta(text("meta_value", "varchar(3)", 3), "billing_email")
+	coverage, _ := Cover(a, s)
+
+	if tables := Bootstrap(coverage); len(tables) != 0 {
+		t.Errorf("Bootstrap() = %+v, want nothing written — fake.email cannot fill a varchar(3)", tables)
+	}
+}
+
+// A `*` in a `keys` entry is a prefix, or refused, so a key holding one cannot be named by
+// itself. Writing it would classify every key it prefixes, or break the file.
+func TestBootstrapLeavesAKeyTheFileCannotName(t *testing.T) {
+	a, s := usermeta(schema.Column{Name: "meta_value", Type: "longtext", Declared: "longtext"}, "legacy*_email")
+	coverage, _ := Cover(a, s)
+
+	if tables := Bootstrap(coverage); len(tables) != 0 {
+		t.Errorf("Bootstrap() = %+v, want nothing written for legacy*_email", tables)
 	}
 }

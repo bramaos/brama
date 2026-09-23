@@ -6,6 +6,7 @@ import (
 	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/preset"
+	"github.com/bramaos/brama/internal/schema"
 )
 
 // The two lanes are what the amendment carries and what it does not. A tightening and a
@@ -65,10 +66,55 @@ func TestPendingIsTheDecisionsNobodyButAHumanCanMake(t *testing.T) {
 		// A pull refuses on one either way, and it is reported — but answering it is the
 		// interactive review's job, not this one's.
 		"a column nothing claims": {anonymize.Review{Unclassified: []anonymize.Uncovered{{Table: "users"}}}, false},
-		"nothing at all":          {anonymize.Review{}, false},
+		// A key nothing claims refuses at `check`, and naming what it holds is a
+		// person's job — handed back like a keep nobody approved.
+		"a key nothing claims": {anonymize.Review{UnclassifiedKeys: []anonymize.UncoveredKey{{Table: "usermeta"}}}, true},
+		"nothing at all":       {anonymize.Review{}, false},
 	} {
 		if got := tc.review.Pending(); got != tc.want {
 			t.Errorf("%s: Pending() = %v, want %v", name, got, tc.want)
 		}
 	}
+}
+
+// A key a Generator claims is written into the automatic lane with the Discriminator and
+// value it is read by, which is what lets it land in a table only the Preset keys.
+func TestAmendmentsWriteAClaimedKeyWithItsDiscriminator(t *testing.T) {
+	review := anonymize.Review{New: []config.TableClassification{{
+		Name: "wp_usermeta", Discriminator: "meta_key", Value: "meta_value",
+		Keys: []config.ColumnClassification{{Name: "billing_email", Action: "fake.email"}},
+	}}}
+
+	got := review.Amendments()
+
+	want := config.Amendment{
+		Table: "wp_usermeta", Key: "billing_email", Discriminator: "meta_key", Value: "meta_value", Action: "fake.email",
+	}
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("Amendments() = %+v, want [%+v]", got, want)
+	}
+	if review.Automatic() != 1 {
+		t.Errorf("Automatic() = %d, want 1", review.Automatic())
+	}
+}
+
+// Plan hands back what Bootstrap could not claim, and only that.
+func TestPlanHandsBackTheKeysNothingClaims(t *testing.T) {
+	coverage := &anonymize.Coverage{UnclassifiedKeys: []anonymize.UncoveredKey{
+		{Table: "usermeta", Discriminator: "meta_key", Value: "billing_email", Selects: longtext("meta_value")},
+		{Table: "usermeta", Discriminator: "meta_key", Value: "stripe_customer_id", Selects: longtext("meta_value")},
+	}}
+
+	review := anonymize.Plan(&config.Config{}, nil, nil, coverage)
+
+	if got := anonymize.ClaimedKeys(review.New); got != 1 {
+		t.Errorf("ClaimedKeys(New) = %d, want billing_email claimed", got)
+	}
+	if len(review.UnclassifiedKeys) != 1 || review.UnclassifiedKeys[0].Value != "stripe_customer_id" {
+		t.Errorf("UnclassifiedKeys = %+v, want stripe_customer_id alone", review.UnclassifiedKeys)
+	}
+}
+
+func longtext(name string) schema.Column {
+	return schema.Column{Name: name, Type: "longtext", Declared: "longtext"}
 }

@@ -233,3 +233,27 @@ app:
 		t.Errorf("tables = %v, want both written", got.Tables)
 	}
 }
+
+// A key/value table is written with its Discriminator and value beside the keys a
+// Generator claimed, because `keys` without them classifies nothing.
+func TestAddAnonymizeWritesAKeyedTable(t *testing.T) {
+	out, err := config.AddAnonymize([]byte(skeleton), "wordpress", []config.TableClassification{
+		{Name: "wp_usermeta", Discriminator: "meta_key", Value: "meta_value", Keys: []config.ColumnClassification{
+			{Name: "billing_email", Action: "fake.email"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AddAnonymize() = %v", err)
+	}
+
+	usermeta := parseAnonymize(t, out).Tables["wp_usermeta"]
+	if usermeta.Discriminator != "meta_key" || usermeta.Value != "meta_value" {
+		t.Errorf("wp_usermeta discriminator, value = %q, %q, want meta_key, meta_value", usermeta.Discriminator, usermeta.Value)
+	}
+	if got := usermeta.Keys["billing_email"].Action; got != "fake.email" {
+		t.Errorf("wp_usermeta keys billing_email = %q, want fake.email\n%s", got, out)
+	}
+	if strings.Contains(string(out), "columns:") {
+		t.Errorf("a table with no column claimed has a columns mapping:\n%s", out)
+	}
+}

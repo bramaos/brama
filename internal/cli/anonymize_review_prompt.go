@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
@@ -35,6 +36,11 @@ type decisions struct {
 	// amendments are the Classifications the declines wrote — the answer each line
 	// showed before the decision was made.
 	amendments []config.Amendment
+	// kept are the `keep`s written for keys nothing classified, where somebody approved
+	// one for a destination. An Approval of a key the file does not keep approves
+	// nothing, so each is the approval's precondition rather than a decision of its own,
+	// and recorded does not count it twice.
+	kept []config.Amendment
 }
 
 // recorded is how many decisions this run wrote down. A nil decisions is nobody's
@@ -83,6 +89,9 @@ type approval struct {
 type question struct {
 	item    prompt.Item
 	columns anonymize.Fallbacks
+	// key is the Discriminator value nothing classifies that this line decides, and nil
+	// on a line about kept columns.
+	key *anonymize.UncoveredKey
 }
 
 // askReview puts the pending half to whoever is at the keyboard, one checklist per
@@ -100,9 +109,13 @@ func askReview(ask asker, own *config.Config, review anonymize.Review, environme
 	// resolved once every question has been answered.
 	counted := map[string]*count{}
 	var order []string
+	// A key nothing classifies is kept where any destination approves it, and left
+	// Unclassified where none does. Collected in the order it was first approved.
+	approvedKeys := map[string]bool{}
 
 	for _, name := range environments {
 		questions := environmentQuestions(own, review.Unapproved.For(name))
+		questions = append(questions, keyQuestions(review.UnclassifiedKeys)...)
 		if len(questions) == 0 {
 			continue
 		}
@@ -117,6 +130,17 @@ func askReview(ask asker, own *config.Config, review anonymize.Review, environme
 
 		granted := approval{environment: name}
 		for i, q := range questions {
+			if q.key != nil {
+				if !answers[i] {
+					continue
+				}
+				granted.refs = append(granted.refs, keyRef(*q.key))
+				if !approvedKeys[q.key.String()] {
+					approvedKeys[q.key.String()] = true
+					out.kept = append(out.kept, keep(*q.key))
+				}
+				continue
+			}
 			for _, column := range q.columns {
 				// Keyed by the printable name, which is the one thing unique across both
 				// forms: a table can hold a column and a Discriminator value under the
@@ -232,6 +256,40 @@ func environmentQuestions(own *config.Config, pending anonymize.Fallbacks) []que
 		questions = append(questions, presetQuestion(own.Anonymize.Preset, shipped))
 	}
 	return questions
+}
+
+// keyQuestions are the Discriminator values nothing classifies, one line each. Ticking
+// one approves exposing it as real data, which is the question the checklist asks;
+// declining has no answer to fall back on, so the key stays Unclassified. A key the file
+// cannot name is not offered, since ticking it would write a prefix, and it stays pending.
+func keyQuestions(keys []anonymize.UncoveredKey) []question {
+	out := make([]question, 0, len(keys))
+	for i := range keys {
+		if !keys[i].Nameable() {
+			continue
+		}
+		out = append(out, question{
+			item: prompt.Item{
+				Label: keys[i].String(),
+				Note:  "nothing classifies it — declining leaves it unclassified",
+			},
+			key: &keys[i],
+		})
+	}
+	return out
+}
+
+// keyRef is the Approval of one Discriminator value, named by its key.
+func keyRef(k anonymize.UncoveredKey) config.ColumnRef {
+	return config.ColumnRef{Table: k.Table, Column: k.Discriminator, Key: config.SpellKey(k.Value)}
+}
+
+// keep is the Classification an approved key nothing classified is written with, and the
+// Discriminator and value beside it where the file's table does not name them yet.
+func keep(k anonymize.UncoveredKey) config.Amendment {
+	return config.Amendment{
+		Table: k.Table, Key: k.Value, Discriminator: k.Discriminator, Value: k.Selects.Name, Action: config.Keep,
+	}
 }
 
 // line is one column as the checklist shows it: what it is, and what stands if it is left
@@ -354,7 +412,8 @@ func applyDecisions(path string, review anonymize.Review, d *decisions) (bool, e
 		return false, fmt.Errorf("reading %s: %w", filepath.Base(path), err)
 	}
 
-	updated, err := config.AmendAnonymize(body, append(review.Amendments(), d.amendments...))
+	amendments := slices.Concat(review.Amendments(), d.kept, d.amendments)
+	updated, err := config.AmendAnonymize(body, amendments)
 	if err != nil {
 		return false, fmt.Errorf("recording the review in %s: %w", filepath.Base(path), err)
 	}

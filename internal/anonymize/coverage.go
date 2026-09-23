@@ -2,6 +2,7 @@ package anonymize
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/generator"
@@ -56,7 +57,17 @@ type UncoveredKey struct {
 	// Value is the key as the database holds it, byte for byte. "" is a row with no
 	// key, NULL or empty.
 	Value string
+	// Selects is the column the key selects a value in — the table's `value` — as the
+	// Schema has it, and zero where the Schema does not. A Generator claiming the key
+	// has to fill it.
+	Selects schema.Column
 }
+
+// Nameable reports whether the file can name this key by itself. A `*` in a `keys` entry
+// makes it a prefix, or a file `check` refuses, so a key holding one would be written as a
+// classification of every key it prefixes, or not written at all. A person decides it in
+// the file.
+func (k UncoveredKey) Nameable() bool { return !strings.Contains(k.Value, "*") }
 
 // String is the key the way a Refusal names it: `wp_usermeta.meta_key='stripe_customer_id'`.
 // The empty value is spelled as the file spells its entry, `wp_usermeta.meta_key=""`, so
@@ -154,11 +165,12 @@ func coverKeys(coverage *Coverage, classified config.Table, t schema.Table) {
 	if classified.Discriminator == "" || t.Discriminator.Column != classified.Discriminator {
 		return
 	}
+	selects, _ := t.Column(classified.Value)
 	for _, value := range t.Discriminator.Values {
 		coverage.Keys++
 		if _, ok := classified.Match(value); !ok {
 			coverage.UnclassifiedKeys = append(coverage.UnclassifiedKeys, UncoveredKey{
-				Table: t.Name, Discriminator: classified.Discriminator, Value: value,
+				Table: t.Name, Discriminator: classified.Discriminator, Value: value, Selects: selects,
 			})
 		}
 	}

@@ -26,6 +26,12 @@ var ErrAnonymizeExists = errors.New("anonymize block already exists")
 type TableClassification struct {
 	Name    string
 	Columns []ColumnClassification
+	// Discriminator and Value are a key/value table's Discriminator and the column it
+	// selects for, written only beside Keys.
+	Discriminator string
+	Value         string
+	// Keys are Discriminator values, each classified as one `keys` entry.
+	Keys []ColumnClassification
 }
 
 // ColumnClassification is one column's Classification, and the type it was chosen
@@ -101,8 +107,8 @@ func noAnonymizeBlock(doc []byte) error {
 	return nil
 }
 
-// renderAnonymize writes the block. Only `columns` is emitted: a key/value table's
-// discriminator is a fact about rows, and `init` reads no rows.
+// renderAnonymize writes the block. A key/value table's Discriminator and value are
+// written beside its keys, because `keys` without them classifies nothing.
 func renderAnonymize(preset string, tables []TableClassification) []string {
 	out := []string{"anonymize:"}
 	if preset != "" {
@@ -115,14 +121,20 @@ func renderAnonymize(preset string, tables []TableClassification) []string {
 	}
 	out = append(out, "  tables:")
 	for _, t := range tables {
-		out = append(out, "    "+t.Name+":", "      columns:")
-		for _, c := range t.Columns {
-			out = append(out, "        "+c.Name+":")
-			action := "          action: " + string(c.Action)
-			if c.Declared != "" {
-				action = padTo(action, actionCommentColumn) + "  # " + c.Declared
+		out = append(out, "    "+t.Name+":")
+		if len(t.Keys) > 0 {
+			out = append(out, "      discriminator: "+t.Discriminator, "      value: "+t.Value, "      keys:")
+			for _, k := range t.Keys {
+				out = append(out, renderEntry(8, 2, Amendment{
+					Key: k.Name, Discriminator: t.Discriminator, Action: k.Action, Declared: k.Declared,
+				})...)
 			}
-			out = append(out, action)
+		}
+		if len(t.Columns) > 0 {
+			out = append(out, "      columns:")
+			for _, c := range t.Columns {
+				out = append(out, renderEntry(8, 2, Amendment{Column: c.Name, Action: c.Action, Declared: c.Declared})...)
+			}
 		}
 	}
 	return out

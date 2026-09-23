@@ -3,6 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -28,12 +31,17 @@ type Amendment struct {
 	Key string
 	// Discriminator and Value are the table's own two facts, carried so that a keyed
 	// Amendment can be recorded in a file that classifies the table nowhere yet. They
-	// are written only when the table has to be created, and neither is read back out
-	// of a key: a `keys` block under a table with no `discriminator` classifies nothing,
-	// and inventing one would be brama deciding which column selects the rows.
+	// are written where the file's table does not name them — whether it is missing
+	// altogether or was written with its ordinary columns alone — and neither is read
+	// back out of a key: a `keys` block under a table with no `discriminator`
+	// classifies nothing, so the file would not load, and inventing one would be brama
+	// deciding which column selects the rows. They come from the resolved
+	// Classification, usually the Preset's, so brama never invents one.
 	//
 	// Both are empty for an ordinary column, and a keyed Amendment without them can
-	// still amend a table the file already declares a discriminator for.
+	// still amend a table the file already declares both for. A Discriminator also
+	// makes this an Amendment about a key where Key is empty: the empty Discriminator
+	// value, NULL or empty, is a key like any other.
 	Discriminator string
 	Value         string
 	// Action is the Classification to record.
@@ -56,22 +64,29 @@ type Amendment struct {
 
 // entry is the key an Amendment writes under, and group is the mapping that key lives
 // in. A Discriminator value is keyed by its value and an ordinary column by its name.
-func (a Amendment) entry() string { return a.Column + a.Key }
+func (a Amendment) entry() string {
+	if a.keyed() {
+		return spellEntry(a.Key)
+	}
+	return a.Column
+}
 
 func (a Amendment) group() string {
-	if a.Key != "" {
+	if a.keyed() {
 		return "keys"
 	}
 	return "columns"
 }
 
+func (a Amendment) keyed() bool { return a.Key != "" || a.Discriminator != "" }
+
 func (a Amendment) validate() error {
 	switch {
 	case a.Table == "":
 		return errors.New("an amendment names the table it is about")
-	case a.Column == "" && a.Key == "":
+	case a.Column == "" && !a.keyed():
 		return errors.New("an amendment names a column or a discriminator key")
-	case a.Column != "" && a.Key != "":
+	case a.Column != "" && a.keyed():
 		return fmt.Errorf("%s.%s is written as both a column and a discriminator key", a.Table, a.entry())
 	}
 	return a.Action.Validate()
@@ -145,10 +160,11 @@ func anonymizeBlockExists(doc []byte) error {
 // hundreds of lines, and buys back the whole class of bug where an insertion invalidates
 // an offset computed before it.
 func amend(lines []string, a Amendment) ([]string, error) {
-	// anonymize, tables, the table, the group, the entry: five levels, so five passes
-	// is one more than any file can need. The bound is a guard against a step that
-	// reports a change and makes none, not a budget anything is expected to spend.
-	for range 5 {
+	// anonymize, tables, the table, its discriminator and value, the group, the entry:
+	// seven levels, so eight passes is one more than any file can need. The bound is a
+	// guard against a step that reports a change and makes none, not a budget anything
+	// is expected to spend.
+	for range 8 {
 		updated, done, err := amendStep(lines, a)
 		if err != nil {
 			return nil, err
@@ -188,19 +204,14 @@ func amendStep(lines []string, a Amendment) ([]string, bool, error) {
 	}
 
 	table, ok := tables.child(lines, a.Table)
+	if a.keyed() && !ok && (a.Discriminator == "" || a.Value == "") {
+		// A discriminated table brama would have to invent a `discriminator` and a
+		// `value` for, which are facts about the table and not about this key.
+		return nil, false, fmt.Errorf(
+			"%s does not classify %s, and a discriminator key cannot be recorded without one", Filename, a.Table)
+	}
 	if !ok {
-		if a.Key != "" && (a.Discriminator == "" || a.Value == "") {
-			// A discriminated table brama would have to invent a `discriminator` and a
-			// `value` for, which are facts about the table and not about this key.
-			return nil, false, fmt.Errorf(
-				"%s does not classify %s, and a discriminator key cannot be recorded without one", Filename, a.Table)
-		}
-		block := []string{pad(table.indent) + a.Table + ":"}
-		if a.Key != "" {
-			block = append(block,
-				pad(table.indent+step)+"discriminator: "+a.Discriminator,
-				pad(table.indent+step)+"value: "+a.Value)
-		}
+		block := append([]string{pad(table.indent) + a.Table + ":"}, a.discriminated(table.indent+step)...)
 		block = append(block, pad(table.indent+step)+a.group()+":")
 		block = append(block, renderEntry(table.indent+2*step, step, a)...)
 		return insertAt(lines, table.end, block), true, nil
@@ -209,28 +220,38 @@ func amendStep(lines []string, a Amendment) ([]string, bool, error) {
 		return nil, false, err
 	}
 
-	// A `keys` block under a table with no `discriminator` classifies nothing, and
-	// validation refuses the file it would leave behind. The table may be here because
-	// somebody wrote its ordinary columns and never its discriminated half.
-	if a.Key != "" {
-		if _, named := table.child(lines, "discriminator"); !named {
-			if a.Discriminator == "" || a.Value == "" {
-				return nil, false, fmt.Errorf(
-					"%s does not classify %s, and a discriminator key cannot be recorded without one", Filename, a.Table)
-			}
-			return insertAt(lines, table.key+1, []string{
-				pad(table.indent+step) + "discriminator: " + a.Discriminator,
-				pad(table.indent+step) + "value: " + a.Value,
-			}), false, nil
+	// A table the file classifies by column, keyed by the Preset. The key needs the
+	// Discriminator and value beside it, and they go first, where a reader looks for
+	// what the table's keys are keys of. A `keys` block under a table naming neither
+	// classifies nothing, and validation refuses the file it would leave behind: the
+	// table may be here because somebody wrote its ordinary columns and never its
+	// discriminated half.
+	at := table.key + 1
+	if a.keyed() {
+		discriminator, named := table.child(lines, "discriminator")
+		value, valued := table.child(lines, "value")
+		switch {
+		case named && valued:
+			at = value.end
+		case a.Discriminator == "" || a.Value == "":
+			return nil, false, fmt.Errorf(
+				"%s does not classify %s, and a discriminator key cannot be recorded without one", Filename, a.Table)
+		case !named:
+			return insertAt(lines, at, []string{pad(discriminator.indent) + "discriminator: " + a.Discriminator}), false, nil
+		default:
+			return insertAt(lines, discriminator.end, []string{pad(value.indent) + "value: " + a.Value}), false, nil
 		}
 	}
 
 	group, ok := table.child(lines, a.group())
 	if !ok {
+		if !a.keyed() {
+			at = group.end
+		}
 		block := append(
 			[]string{pad(group.indent) + a.group() + ":"},
 			renderEntry(group.indent+step, step, a)...)
-		return insertAt(lines, group.end, block), true, nil
+		return insertAt(lines, at, block), true, nil
 	}
 	if err := group.writable(lines); err != nil {
 		return nil, false, err
@@ -394,6 +415,36 @@ func isComment(line string) bool {
 }
 
 func pad(n int) string { return strings.Repeat(" ", n) }
+
+// discriminated is the Discriminator and value a key needs beside it in a table this
+// Amendment creates, and nothing for a column.
+func (a Amendment) discriminated(indent int) []string {
+	if !a.keyed() {
+		return nil
+	}
+	return []string{pad(indent) + "discriminator: " + a.Discriminator, pad(indent) + "value: " + a.Value}
+}
+
+// spellEntry is a `keys` entry the way the file writes it, so that it reads back as the
+// same bytes. A key is whatever a plugin wrote into the database: plain where plain means
+// the key, and double-quoted where plain would read as something else — nothing, a
+// number, a boolean, a mapping, a comment.
+func spellEntry(key string) string {
+	if key == "" {
+		return EmptyKey
+	}
+	if plainKey.MatchString(key) && !slices.Contains(yamlWords, strings.ToLower(key)) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+// plainKey is a key YAML reads back as itself, unquoted. A `*` is plain anywhere but
+// first, so a prefix entry, `_transient_*`, is one.
+var plainKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]*\*?$`)
+
+// yamlWords are the plain words YAML reads as something other than a string.
+var yamlWords = []string{"null", "true", "false", "yes", "no", "on", "off", "y", "n"}
 
 // renderEntry writes one column entry — the key, and what is written under it.
 func renderEntry(indent, step int, a Amendment) []string {

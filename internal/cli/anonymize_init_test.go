@@ -445,3 +445,79 @@ func TestAnonymizeInitWritesAFileCheckAccepts(t *testing.T) {
 		t.Fatalf("runAnonymizeCheck() after init = %v, want the written file to hold together", err)
 	}
 }
+
+// wordpressUsermeta is the key/value table the wordpress preset keys by meta_key, and
+// nothing else.
+func wordpressUsermeta() schema.Schema {
+	return schema.Schema{Database: "acme", Tables: []schema.Table{{Name: "wp_usermeta", Columns: []schema.Column{
+		{Name: "umeta_id", Type: "bigint", Declared: "bigint(20) unsigned"},
+		{Name: "user_id", Type: "bigint", Declared: "bigint(20) unsigned"},
+		{Name: "meta_key", Type: "varchar", Declared: "varchar(255)", Length: 255},
+		{Name: "meta_value", Type: "longtext", Declared: "longtext"},
+	}}}}
+}
+
+// pluginKeys is what a WordPress install's usermeta holds beyond core's own: a key a
+// generator claims, a key nothing claims, and a row with no key at all.
+func pluginKeys() schemaSource {
+	return withKeys("staging", wordpressUsermeta(), map[string][]string{"wp_usermeta": {
+		"", "billing_email", "first_name", "stripe_customer_id",
+	}})
+}
+
+// A discovered key is classified exactly as a column is: written where a generator claims
+// it by name, left out where none does, and never as a `*` pattern.
+func TestAnonymizeInitWritesTheKeysAGeneratorClaims(t *testing.T) {
+	root := unclassifiedProject(t)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeInit(t.Context(), env, root, "", false, pluginKeys()); err != nil {
+		t.Fatalf("runAnonymizeInit() = %v", err)
+	}
+
+	usermeta := written(t, root).Anonymize.Tables["wp_usermeta"]
+	if got := usermeta.Keys["billing_email"].Action; got != "fake.email" {
+		t.Errorf("wp_usermeta keys billing_email = %q, want fake.email", got)
+	}
+	if usermeta.Discriminator != "meta_key" || usermeta.Value != "meta_value" {
+		t.Errorf("wp_usermeta discriminator, value = %q, %q, want the preset's", usermeta.Discriminator, usermeta.Value)
+	}
+	// first_name is the preset's to answer, and the other two nobody's.
+	for _, key := range []string{"", "first_name", "stripe_customer_id"} {
+		if entry, ok := usermeta.Keys[key]; ok {
+			t.Errorf("wp_usermeta keys %q = %v, want it left out", key, entry)
+		}
+	}
+	if body := readFile(t, root); strings.Contains(body, "*") {
+		t.Errorf("init wrote a pattern, want exact keys only:\n%s", body)
+	}
+	if !strings.Contains(out.String(), "wp_usermeta.meta_key='stripe_customer_id'") {
+		t.Errorf("output does not name the key left unclassified:\n%s", out.String())
+	}
+}
+
+// The keys init leaves are counted in the contract beside the columns it leaves.
+func TestAnonymizeInitContractCountsTheKeys(t *testing.T) {
+	root := unclassifiedProject(t)
+	env, out, _ := testEnv()
+	env.Renderer, env.JSON = renderer.NewJSON(out), true
+
+	if err := runAnonymizeInit(t.Context(), env, root, "", false, pluginKeys()); err != nil {
+		t.Fatalf("runAnonymizeInit() = %v", err)
+	}
+
+	var payload struct {
+		Status       string `json:"status"`
+		Keys         int    `json:"keys"`
+		Unclassified int    `json:"unclassified_keys"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload.Keys != 1 || payload.Unclassified != 2 {
+		t.Errorf("keys, unclassified_keys = %d, %d, want 1, 2", payload.Keys, payload.Unclassified)
+	}
+	if payload.Status != string(renderer.StatusPartial) {
+		t.Errorf("status = %q, want partial — a pull still refuses", payload.Status)
+	}
+}

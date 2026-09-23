@@ -374,3 +374,65 @@ func index(doc, want string) int {
 	}
 	return -1
 }
+
+// A key a Generator claims in a table only the Preset keys. The file has no entry to add
+// it to, so the table is written, with the Discriminator and value the key is read by —
+// `keys` without them classifies nothing, and a file that says so does not load.
+func TestAmendWritesAKeyedTableTheFileDoesNotHave(t *testing.T) {
+	out := amend(t, classified, config.Amendment{
+		Table: "wp_usermeta", Key: "billing_email", Discriminator: "meta_key", Value: "meta_value", Action: "fake.email",
+	})
+
+	got := reread(t, out).Anonymize.Tables["wp_usermeta"]
+	if got.Discriminator != "meta_key" || got.Value != "meta_value" {
+		t.Errorf("wp_usermeta discriminator, value = %q, %q, want meta_key, meta_value", got.Discriminator, got.Value)
+	}
+	if action := got.Keys["billing_email"].Action; action != "fake.email" {
+		t.Errorf("wp_usermeta keys billing_email = %q, want fake.email\n%s", action, out)
+	}
+}
+
+// A table the file classifies by column only, whose Discriminator is the Preset's. The
+// key goes in beside the columns, and the Discriminator and value with it.
+func TestAmendAddsTheDiscriminatorToATableClassifiedByColumn(t *testing.T) {
+	out := amend(t, classified, config.Amendment{
+		Table: "users", Key: "billing_email", Discriminator: "meta_key", Value: "meta_value", Action: "fake.email",
+	})
+
+	users := reread(t, out).Anonymize.Tables["users"]
+	if users.Discriminator != "meta_key" || users.Value != "meta_value" {
+		t.Errorf("users discriminator, value = %q, %q, want meta_key, meta_value", users.Discriminator, users.Value)
+	}
+	if action := users.Keys["billing_email"].Action; action != "fake.email" {
+		t.Errorf("users keys billing_email = %q, want fake.email\n%s", action, out)
+	}
+	if len(users.Columns) != 2 {
+		t.Errorf("users columns = %v, want both left as they were", users.Columns)
+	}
+}
+
+// Without the Discriminator to write, a key cannot go into a table the file does not
+// key, and brama does not invent one.
+func TestAmendRefusesAKeyWithNoDiscriminatorToWrite(t *testing.T) {
+	_, err := config.AmendAnonymize([]byte(classified), []config.Amendment{
+		{Table: "orders", Key: "billing_email", Action: "fake.email"},
+	})
+	if err == nil {
+		t.Error("AmendAnonymize() = nil, want a key with no discriminator refused")
+	}
+}
+
+// A key is whatever a plugin wrote into the database, so it is written the way YAML reads
+// back the same bytes: plain where it can be, and quoted where plain would read as
+// something else — nothing, a number, a boolean, a mapping.
+func TestAmendWritesAKeyTheWayItReadsBack(t *testing.T) {
+	for _, key := range []string{"", "billing email", "123", "yes", "Null", "a: b", "#tag", "_transient_*", "wp.theme-mods"} {
+		out := amend(t, classified, config.Amendment{
+			Table: "usermeta", Key: key, Discriminator: "meta_key", Value: "meta_value", Action: config.Keep,
+		})
+
+		if got := reread(t, out).Anonymize.Tables["usermeta"].Keys[key].Action; got != config.Keep {
+			t.Errorf("usermeta keys %q = %q, want keep\n%s", key, got, out)
+		}
+	}
+}

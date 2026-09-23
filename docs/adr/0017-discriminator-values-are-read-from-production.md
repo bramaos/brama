@@ -7,8 +7,8 @@ that list only exists as rows. If Brama never read the rows, it could not tell t
 Unclassified, and ADR-0003's refusal would have nothing to refuse for key/value tables. That
 is exactly where a plugin puts a customer's billing email.
 
-So the Shim reads a Discriminator's distinct values on the Server: in a connected
-`anonymize check`, in `review` and in a Pull. It never reads the values they select. The
+So the Shim reads a Discriminator's distinct values on the Server: in `anonymize init`, in a
+connected `anonymize check`, in `review` and in a Pull. It never reads the values they select. The
 keys leave the Server as they are, because a Refusal has to name them and so does the
 committed `brama.yaml` that classifies them. The Discriminator column is never classified. A
 key names a kind of value, not a person.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -375,4 +376,98 @@ func index(doc, want string) int {
 		}
 	}
 	return -1
+}
+
+// keyedSettled is settled plus a key/value table the project keys itself, so that the
+// keys read off it are the only thing a run has to decide about.
+const keyedSettled = settled + `    usermeta:
+      discriminator: meta_key
+      value: meta_value
+      keys:
+        nickname:
+          action: fake.username
+`
+
+// settledKeys answers with the schema keyedSettled classifies, and usermeta holding a
+// key it classifies, a key a generator claims, and a key nothing claims.
+func settledKeys() schemaSource {
+	s := settledSchema()
+	s.Tables = append(s.Tables, schema.Table{Name: "usermeta", Columns: []schema.Column{
+		{Name: "meta_key", Type: "varchar", Declared: "varchar(255)", Length: 255},
+		{Name: "meta_value", Type: "longtext", Declared: "longtext"},
+	}})
+	return withKeys("staging", s, map[string][]string{"usermeta": {"billing_email", "nickname", "stripe_customer_id"}})
+}
+
+// A key a generator claims narrows what leaves production, so it is applied without
+// asking — and listed, so that it does not land invisibly.
+func TestReviewAppliesAClaimedKeyUnasked(t *testing.T) {
+	root := classifiedProject(t, keyedSettled)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", settledKeys()); err == nil {
+		t.Fatal("runAnonymizeReview() = nil, want stripe_customer_id handed back")
+	}
+
+	if got := written(t, root).Anonymize.Tables["usermeta"].Keys["billing_email"].Action; got != "fake.email" {
+		t.Errorf("usermeta keys billing_email = %q, want the claim written", got)
+	}
+	if !strings.Contains(out.String(), "usermeta.meta_key='billing_email' → fake.email") {
+		t.Errorf("output does not list the applied key:\n%s", out.String())
+	}
+}
+
+// A key nothing claims is handed back. With nobody at the keyboard that is the
+// review_required refusal, naming the key, and nothing written for it.
+func TestReviewHandsBackAKeyNothingClaims(t *testing.T) {
+	root := classifiedProject(t, keyedSettled)
+	env, out, _ := testEnv()
+	env.Renderer, env.JSON = renderer.NewJSON(out), true
+
+	r := refused(t, runAnonymizeReview(t.Context(), env, root, "", settledKeys()))
+
+	if r.Reason != refusal.ReviewRequired {
+		t.Errorf("reason = %q, want review_required", r.Reason)
+	}
+	if _, ok := written(t, root).Anonymize.Tables["usermeta"].Keys["stripe_customer_id"]; ok {
+		t.Error("stripe_customer_id was written, want it left for a person")
+	}
+
+	var payload struct {
+		Reason  string   `json:"reason"`
+		Pending int      `json:"pending_decisions"`
+		NewKeys []string `json:"applied_new_keys"`
+		Keys    []string `json:"pending_unclassified_keys"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("the contract does not decode: %v\n%s", err, out.String())
+	}
+	if payload.Reason != string(refusal.ReviewRequired) || payload.Pending != 1 {
+		t.Errorf("reason, pending_decisions = %q, %d, want review_required, 1", payload.Reason, payload.Pending)
+	}
+	if !slices.Equal(payload.NewKeys, []string{"usermeta.meta_key='billing_email' → fake.email"}) {
+		t.Errorf("applied_new_keys = %v, want billing_email", payload.NewKeys)
+	}
+	if !slices.Equal(payload.Keys, []string{"usermeta.meta_key='stripe_customer_id'"}) {
+		t.Errorf("pending_unclassified_keys = %v, want stripe_customer_id", payload.Keys)
+	}
+}
+
+// A key in a table only the preset keys goes into the file with the preset's
+// discriminator and value beside it, and the file still loads.
+func TestReviewWritesAClaimedKeyIntoATableOnlyThePresetKeys(t *testing.T) {
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	env, _, _ := testEnv()
+
+	if err := runAnonymizeReview(t.Context(), env, root, "", pluginKeys()); err == nil {
+		t.Fatal("runAnonymizeReview() = nil, want stripe_customer_id handed back")
+	}
+
+	usermeta := written(t, root).Anonymize.Tables["wp_usermeta"]
+	if got := usermeta.Keys["billing_email"].Action; got != "fake.email" {
+		t.Errorf("wp_usermeta keys billing_email = %q, want the claim written", got)
+	}
+	if usermeta.Discriminator != "meta_key" || usermeta.Value != "meta_value" {
+		t.Errorf("wp_usermeta discriminator, value = %q, %q, want the preset's", usermeta.Discriminator, usermeta.Value)
+	}
 }

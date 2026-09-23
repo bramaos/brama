@@ -186,6 +186,16 @@ func uncoveredNames(uncovered []anonymize.Uncovered) []string {
 	return indentAll(out)
 }
 
+// keyNames is one line a Discriminator value, spelled the way a Refusal names it:
+// `wp_usermeta.meta_key='stripe_customer_id'`.
+func keyNames(keys []anonymize.UncoveredKey) []string {
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k.String())
+	}
+	return out
+}
+
 func indentAll(lines []string) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -430,10 +440,10 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 	if len(read.Problems) > 0 {
 		return refusal.New(refusal.Invalid, problemDetail(read.Problems), "")
 	}
-	// An Unclassified key refuses, as anything Unclassified does (ADR 0003). Unlike a
-	// column it has no `anonymize init` to offer it an answer: which keys a prefix should
-	// cover is a decision about every key a plugin will ever write, and a person makes it
-	// in the file.
+	// An Unclassified key refuses, as anything Unclassified does (ADR 0003). `init` and
+	// `review` classify the keys a Generator claims by name; which of the rest a prefix
+	// should cover is a decision about every key a plugin will ever write, and a person
+	// makes it in the file.
 	if read.Coverage != nil && len(read.Coverage.UnclassifiedKeys) > 0 {
 		return refusal.New(refusal.Unclassified, keysDetail(read.Coverage.UnclassifiedKeys), "")
 	}
@@ -647,6 +657,20 @@ func plural(n int, word string) string {
 		return fmt.Sprintf("%d %s", n, word)
 	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// entries counts columns and Discriminator values apart. A key is not a column: it is
+// one entry under `keys`, and calling eighteen of them "18 columns" sends the reader
+// through `columns:` looking for entries that are not there.
+func entries(columns, keys int) string {
+	switch {
+	case keys == 0:
+		return plural(columns, "column")
+	case columns == 0:
+		return plural(keys, "key")
+	default:
+		return plural(columns, "column") + " and " + plural(keys, "key")
+	}
 }
 
 func isAre(n int) string {

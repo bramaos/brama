@@ -11,6 +11,20 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Classify discriminator values in `brama anonymize init` the way columns are classified.
+  A key a generator claims by name, like `billing_email`, is written as
+  `fake.<generator>`, and a key none claims is left out and unclassified. Only exact keys
+  are written, never a `*` pattern. `--json` counts them as `keys` and
+  `unclassified_keys`. (#71, #8)
+- Write a key's `discriminator` and `value` from the preset when the file's table does not
+  name them yet, so a key can be classified in a table only the preset keys. (#71, #8)
+- Apply a key a generator claims in `brama anonymize review` without asking, and list it,
+  in `--json` too as `applied_new_keys`. (#71, #8)
+- Hand back every key nothing classifies from `brama anonymize review`. In a terminal each
+  one is on every destination's list, and ticking it keeps the key and approves it for that
+  destination. With nobody there the run exits `review_required` and names each key under
+  `pending_unclassified_keys`. A key that itself holds a `*` is never offered or written,
+  because the file would read it as a prefix. You decide it in `brama.yaml`. (#71, #8)
 - Refuse every discriminator value nothing classifies: where `anonymize check` reads an
   environment's schema it also reads the keys each discriminator holds, and exits 42
   naming every key no `keys` entry matches — `wp_usermeta.meta_key='stripe_customer_id'
