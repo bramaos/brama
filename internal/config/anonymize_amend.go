@@ -26,6 +26,16 @@ type Amendment struct {
 	Column string
 	// Key is a Discriminator value — a row selector, not a column of its own.
 	Key string
+	// Discriminator and Value are the table's own two facts, carried so that a keyed
+	// Amendment can be recorded in a file that classifies the table nowhere yet. They
+	// are written only when the table has to be created, and neither is read back out
+	// of a key: a `keys` block under a table with no `discriminator` classifies nothing,
+	// and inventing one would be brama deciding which column selects the rows.
+	//
+	// Both are empty for an ordinary column, and a keyed Amendment without them can
+	// still amend a table the file already declares a discriminator for.
+	Discriminator string
+	Value         string
 	// Action is the Classification to record.
 	Action Classification
 	// Correlate is the Correlation group to record beside it, and is empty where the
@@ -179,19 +189,40 @@ func amendStep(lines []string, a Amendment) ([]string, bool, error) {
 
 	table, ok := tables.child(lines, a.Table)
 	if !ok {
-		if a.Key != "" {
+		if a.Key != "" && (a.Discriminator == "" || a.Value == "") {
 			// A discriminated table brama would have to invent a `discriminator` and a
 			// `value` for, which are facts about the table and not about this key.
 			return nil, false, fmt.Errorf(
 				"%s does not classify %s, and a discriminator key cannot be recorded without one", Filename, a.Table)
 		}
-		block := append(
-			[]string{pad(table.indent) + a.Table + ":", pad(table.indent+step) + a.group() + ":"},
-			renderEntry(table.indent+2*step, step, a)...)
+		block := []string{pad(table.indent) + a.Table + ":"}
+		if a.Key != "" {
+			block = append(block,
+				pad(table.indent+step)+"discriminator: "+a.Discriminator,
+				pad(table.indent+step)+"value: "+a.Value)
+		}
+		block = append(block, pad(table.indent+step)+a.group()+":")
+		block = append(block, renderEntry(table.indent+2*step, step, a)...)
 		return insertAt(lines, table.end, block), true, nil
 	}
 	if err := table.writable(lines); err != nil {
 		return nil, false, err
+	}
+
+	// A `keys` block under a table with no `discriminator` classifies nothing, and
+	// validation refuses the file it would leave behind. The table may be here because
+	// somebody wrote its ordinary columns and never its discriminated half.
+	if a.Key != "" {
+		if _, named := table.child(lines, "discriminator"); !named {
+			if a.Discriminator == "" || a.Value == "" {
+				return nil, false, fmt.Errorf(
+					"%s does not classify %s, and a discriminator key cannot be recorded without one", Filename, a.Table)
+			}
+			return insertAt(lines, table.key+1, []string{
+				pad(table.indent+step) + "discriminator: " + a.Discriminator,
+				pad(table.indent+step) + "value: " + a.Value,
+			}), false, nil
+		}
 	}
 
 	group, ok := table.child(lines, a.group())

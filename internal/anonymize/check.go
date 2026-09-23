@@ -258,6 +258,11 @@ type entry struct {
 	// otherwise. An Approval of a Discriminator value names it, so what records one
 	// needs it carried rather than read back out of name.
 	discriminator string
+	// value is the column the discriminator selects for, for a keyed entry, and empty
+	// otherwise. Writing a keyed entry into a table the file does not classify yet has
+	// to write the table's own two facts with it, and they are facts about the table
+	// rather than about this key.
+	value string
 	// keyed says the entry is one Discriminator value rather than a column. It is
 	// approved by a `table.column=key` reference and never a `table.column` one: the
 	// column a bare reference would name holds every key's value at once, which is why
@@ -283,6 +288,7 @@ func entries(a *config.Anonymize) []entry {
 				table:         table,
 				field:         key,
 				discriminator: t.Discriminator,
+				value:         t.Value,
 				keyed:         true,
 				column:        t.Keys[key],
 			})

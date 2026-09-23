@@ -147,6 +147,16 @@ func TestLookupNamesTheDiscriminatorKeysThatCarryThePrefix(t *testing.T) {
 	if _, known := keys["first_name"]; !known {
 		t.Errorf("keys = %v, want first_name left as core writes it", slices.Sorted(maps.Keys(keys)))
 	}
+
+	// The options table carries one too, and it sits beside options core names `wp_`
+	// outright — `wp_page_for_privacy_policy` is not `$table_prefix` + a name.
+	options := p.Tables["acme_options"].Keys
+	if _, known := options["acme_user_roles"]; !known {
+		t.Errorf("keys = %v, want the roles option named acme_user_roles", slices.Sorted(maps.Keys(options)))
+	}
+	if _, known := options["wp_page_for_privacy_policy"]; !known {
+		t.Errorf("keys = %v, want the wp_-named option left as core writes it", slices.Sorted(maps.Keys(options)))
+	}
 }
 
 // The placeholder is never a table name. A preset resolved without a prefix would
@@ -234,6 +244,104 @@ func TestTheWordPressPresetCoversTheCoreTables(t *testing.T) {
 	} {
 		if _, known := a.Tables[table]; !known {
 			t.Errorf("the wordpress preset says nothing about %s", table)
+		}
+	}
+}
+
+// The three core tables that store many kinds of value in one column each classify per
+// Discriminator value. One answer for `meta_value` or `option_value` is either a site
+// that does not boot or every kind of value the column holds travelling whole.
+func TestTheWordPressPresetClassifiesTheKeyValueTablesPerKey(t *testing.T) {
+	a := mustApply(t, "wordpress")
+
+	for _, tt := range []struct {
+		table         string
+		discriminator string
+		value         string
+		key           string
+		want          config.Classification
+	}{
+		{"wp_usermeta", "meta_key", "meta_value", "first_name", "fake.first_name"},
+		{"wp_postmeta", "meta_key", "meta_value", "_thumbnail_id", config.Keep},
+		{"wp_options", "option_name", "option_value", "blogname", config.Keep},
+	} {
+		t.Run(tt.table, func(t *testing.T) {
+			tbl := a.Tables[tt.table]
+			if tbl.Discriminator != tt.discriminator || tbl.Value != tt.value {
+				t.Fatalf("%s discriminator/value = %q/%q, want %q/%q",
+					tt.table, tbl.Discriminator, tbl.Value, tt.discriminator, tt.value)
+			}
+			if got := tbl.Keys[tt.key].Action; got != tt.want {
+				t.Errorf("%s.%s=%s = %q, want %q", tt.table, tt.discriminator, tt.key, got, tt.want)
+			}
+			// The discriminator and the value it selects for are classified through
+			// the keys, so neither is an ordinary column of the table.
+			for _, column := range []string{tt.discriminator, tt.value} {
+				if _, wholesale := tbl.Columns[column]; wholesale {
+					t.Errorf("%s.%s is classified as an ordinary column, which answers for every key at once",
+						tt.table, column)
+				}
+			}
+		})
+	}
+}
+
+// Transients are caches. They regenerate on their own, and some hold a remote response
+// that carried personal data into the options table — and the hash in the name means
+// every one of them would otherwise be an Unclassified key refusing the next Pull.
+func TestTheWordPressPresetDropsTransients(t *testing.T) {
+	options := mustApply(t, "wordpress").Tables["wp_options"]
+
+	for _, value := range []string{
+		"_transient_doing_cron", "_transient_timeout_feed_a1b2c3",
+		"_site_transient_update_core", "_site_transient_timeout_theme_roots",
+	} {
+		key, classified := options.Match(value)
+		if !classified {
+			t.Errorf("wp_options.option_name=%s is unclassified, want a prefix entry covering it", value)
+			continue
+		}
+		if got := options.Keys[key].Action; got != config.Drop {
+			t.Errorf("wp_options.option_name=%s matched %q = %q, want %q", value, key, got, config.Drop)
+		}
+	}
+}
+
+// An option holding a credential or a live address is classified as what it is. Keeping
+// one hands a destination a working mailbox login, or a site that mails the real owner
+// every time it sends a notification.
+func TestTheWordPressPresetKeepsNoCredentialOrAddressOption(t *testing.T) {
+	options := mustApply(t, "wordpress").Tables["wp_options"]
+
+	for _, option := range []string{
+		"admin_email", "new_admin_email", "mailserver_login", "mailserver_pass",
+		"ftp_credentials", "recovery_keys",
+	} {
+		got, classified := options.Keys[option]
+		if !classified {
+			t.Errorf("wp_options says nothing about %s", option)
+			continue
+		}
+		if got.Action == config.Keep {
+			t.Errorf("wp_options.option_name=%s = keep, want it faked or dropped", option)
+		}
+	}
+}
+
+// The preset carries core's keys and no more. A plugin's key is Unclassified until the
+// project says what it holds, which is the refusal working rather than a gap in the
+// preset: guessing at `acme_billing_vat` from its name is the inference a preset exists
+// to replace.
+func TestAPluginsKeyIsUnclassifiedInTheKeyValueTables(t *testing.T) {
+	a := mustApply(t, "wordpress")
+
+	for _, tt := range []struct{ table, value string }{
+		{"wp_usermeta", "acme_billing_vat"},
+		{"wp_postmeta", "acme_product_sku"},
+		{"wp_options", "acme_license_key"},
+	} {
+		if key, classified := a.Tables[tt.table].Match(tt.value); classified {
+			t.Errorf("%s Match(%q) = %q, want a plugin's key left unclassified", tt.table, tt.value, key)
 		}
 	}
 }

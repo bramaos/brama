@@ -167,6 +167,68 @@ func TestAmendWritesADiscriminatorKeyUnderKeys(t *testing.T) {
 	}
 }
 
+// A preset classifies a key/value table the file says nothing about — `wp_options` on a
+// WordPress project — and declining one of its keeps has to write the key somewhere. The
+// table is created with the two facts that make a `keys` block mean anything, carried on
+// the amendment: a `keys` mapping under a table with no discriminator classifies nothing.
+func TestAmendCreatesADiscriminatedTableFromTheFactsItCarries(t *testing.T) {
+	out := amend(t, classified, config.Amendment{
+		Table: "options", Key: "mailserver_url", Discriminator: "option_name", Value: "option_value",
+		Action: "fake.url",
+	})
+
+	options := reread(t, out).Anonymize.Tables["options"]
+	if options.Discriminator != "option_name" || options.Value != "option_value" {
+		t.Fatalf("options discriminator/value = %q/%q, want option_name/option_value",
+			options.Discriminator, options.Value)
+	}
+	if got := options.Keys["mailserver_url"].Action; got != "fake.url" {
+		t.Errorf("options keys mailserver_url = %q, want fake.url", got)
+	}
+}
+
+// The table is here and its discriminated half is not, because somebody wrote its
+// ordinary columns and stopped. A `keys` block under no discriminator is the file
+// validation refuses, so the two facts go in above it.
+func TestAmendNamesTheDiscriminatorOfATableWrittenWithColumnsAlone(t *testing.T) {
+	const columnsOnly = classified + `    options:
+      columns:
+        option_id:
+          action: keep
+`
+	out := amend(t, columnsOnly, config.Amendment{
+		Table: "options", Key: "mailserver_url", Discriminator: "option_name", Value: "option_value",
+		Action: "fake.url",
+	})
+
+	options := reread(t, out).Anonymize.Tables["options"]
+	if options.Discriminator != "option_name" || options.Value != "option_value" {
+		t.Fatalf("options discriminator/value = %q/%q, want them written above the keys:\n%s",
+			options.Discriminator, options.Value, out)
+	}
+	if got := options.Keys["mailserver_url"].Action; got != "fake.url" {
+		t.Errorf("options keys mailserver_url = %q, want fake.url", got)
+	}
+	if got := options.Columns["option_id"].Action; got != config.Keep {
+		t.Errorf("options.option_id = %q, want the column that was there left alone", got)
+	}
+}
+
+// Without them there is nothing to write. Inventing a discriminator would be brama
+// deciding which column selects the rows of a table it was told nothing about.
+func TestAmendRefusesAKeyForATableTheFileAndTheAmendmentBothLeaveOpen(t *testing.T) {
+	_, err := config.AmendAnonymize([]byte(classified), []config.Amendment{
+		{Table: "options", Key: "mailserver_url", Action: "fake.url"},
+	})
+
+	if err == nil {
+		t.Fatal("AmendAnonymize() = nil, want a refusal rather than a keys block under no discriminator")
+	}
+	if !strings.Contains(err.Error(), "options") {
+		t.Errorf("error = %q, want the table it could not record named", err)
+	}
+}
+
 // The `columns` mapping is created where a table has only keys, because a discriminated
 // table has ordinary columns too and the file may not mention them yet.
 func TestAmendCreatesTheColumnsMapping(t *testing.T) {

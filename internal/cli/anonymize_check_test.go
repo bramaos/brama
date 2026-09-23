@@ -502,7 +502,7 @@ func TestCheckCoversTheColumnsAPresetClassifies(t *testing.T) {
 // stacked on top of the one typo that caused it.
 func TestCheckRefusesAPresetBramaDoesNotShipAndSaysNothingElse(t *testing.T) {
 	root := projectFile(t, "anonymize:\n  preset: wordpres\n",
-		map[string]string{"local": "wp_options.option_value"})
+		map[string]string{"local": "wp_posts.post_content"})
 	env, _, _ := testEnv()
 	core := schema.Schema{Database: "acme", Tables: []schema.Table{{
 		Name:    "wp_users",
@@ -519,7 +519,7 @@ func TestCheckRefusesAPresetBramaDoesNotShipAndSaysNothingElse(t *testing.T) {
 	}
 }
 
-// A preset is knowledge, not authorization. It classifies `wp_options.option_value` as
+// A preset is knowledge, not authorization. It classifies `wp_posts.post_content` as
 // keep, and that grants no environment anything: the approval is a separate line a human
 // writes, and check accepts it only because they did.
 func TestCheckTreatsAPresetsKeepAsUnapprovedUntilAHumanApprovesIt(t *testing.T) {
@@ -535,14 +535,14 @@ func TestCheckTreatsAPresetsKeepAsUnapprovedUntilAHumanApprovesIt(t *testing.T) 
 		t.Fatal(err)
 	}
 	for name, environment := range cfg.Environments {
-		if environment.Approves("wp_options", "option_value") {
+		if environment.Approves("wp_posts", "post_content") {
 			t.Errorf("%s approves a column only the preset kept — a preset grants no approval", name)
 		}
 	}
 
 	// And the approval a human does write is accepted, because the preset said what the
 	// column holds.
-	approved := projectFile(t, block, map[string]string{"local": "wp_options.option_value"})
+	approved := projectFile(t, block, map[string]string{"local": "wp_posts.post_content"})
 	if err := runAnonymizeCheck(t.Context(), env, approved, "", unreachable); err != nil {
 		t.Fatalf("runAnonymizeCheck() = %v, want an approval of a preset-kept column accepted", err)
 	}
