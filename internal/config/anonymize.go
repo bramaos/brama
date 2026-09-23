@@ -127,10 +127,59 @@ type Anonymize struct {
 // but never both has nothing to say about `usermeta.umeta_id`, which leaves a column
 // Unclassified for want of a place to write it down.
 type Table struct {
-	Discriminator string            `yaml:"discriminator,omitempty"`
-	Value         string            `yaml:"value,omitempty"`
-	Keys          map[string]Column `yaml:"keys,omitempty"`
-	Columns       map[string]Column `yaml:"columns,omitempty"`
+	Discriminator string `yaml:"discriminator,omitempty"`
+	Value         string `yaml:"value,omitempty"`
+	// Keys classifies Discriminator values, each entry by its exact name or by a prefix
+	// ending in `*` — `_transient_*`. Match says which entry answers for a value.
+	Keys    map[string]Column `yaml:"keys,omitempty"`
+	Columns map[string]Column `yaml:"columns,omitempty"`
+}
+
+// Match returns the `keys` entry that classifies one Discriminator value, as written, and
+// whether any does.
+//
+// The entry naming the value exactly wins, and after it the longest prefix covering it,
+// so `_transient_doing_cron` can say something of its own under `_transient_*`. Without
+// prefixes every transient hash WordPress invents would be Unclassified and refuse the
+// next Pull. See docs/adr/0017-discriminator-values-are-read-from-production.md.
+//
+// Values are compared as bytes. A row with no value, NULL or empty, is the empty value,
+// and is matched like any other.
+func (t Table) Match(value string) (string, bool) {
+	if _, ok := t.Keys[value]; ok {
+		return value, true
+	}
+	// Two prefixes of one value that are the same length are the same prefix, so the
+	// longest is never a tie and map order cannot pick between entries.
+	best, longest := "", -1
+	for key := range t.Keys {
+		prefix, ok := pattern(key)
+		if ok && len(prefix) > longest && strings.HasPrefix(value, prefix) {
+			best, longest = key, len(prefix)
+		}
+	}
+	return best, longest >= 0
+}
+
+// pattern reports whether a `keys` entry is a prefix — `_transient_*` — and the prefix it
+// matches: everything before the closing `*`. A `*` before that is taken literally here,
+// and `anonymize check` refuses the entry.
+func pattern(key string) (string, bool) {
+	return strings.CutSuffix(key, "*")
+}
+
+// EmptyKey is how the file spells the empty Discriminator value, in a `keys` entry's
+// path and in an Approval: `usermeta.meta_key=""`. Written bare, a reference ending in
+// `=` names nothing, and a path ending in `keys.` reads as a typo.
+const EmptyKey = `""`
+
+// SpellKey is a `keys` entry the way the file spells it: the entry itself, or EmptyKey for
+// the empty Discriminator value.
+func SpellKey(key string) string {
+	if key == "" {
+		return EmptyKey
+	}
+	return key
 }
 
 // Column is what the file says about one column, or about one Discriminator value.
@@ -206,10 +255,19 @@ func (c *Column) UnmarshalYAML(node ast.Node) error {
 type ColumnRef struct {
 	Table  string
 	Column string
-	// Key is the Discriminator value this reference is for, and empty for an ordinary
-	// column. Where it is set, Column is the table's Discriminator rather than the
-	// column whose real values are at stake.
+	// Key is the `keys` entry this reference is for, spelled as the file spells it —
+	// a prefix keeps its `*`, and the empty Discriminator value is EmptyKey — and empty
+	// for an ordinary column. Where it is set, Column is the table's Discriminator rather
+	// than the column whose real values are at stake.
 	Key string
+}
+
+// Entry is the `keys` entry a keyed reference names, as a key of Table.Keys.
+func (r ColumnRef) Entry() string {
+	if r.Key == EmptyKey {
+		return ""
+	}
+	return r.Key
 }
 
 func (r ColumnRef) String() string {
@@ -354,7 +412,7 @@ func (c *Config) validateAnonymize(add func(string, ...any)) {
 		}
 
 		for _, key := range sortedKeys(table.Keys) {
-			validateColumn(add, at+".keys."+key, table.Keys[key])
+			validateColumn(add, at+".keys."+SpellKey(key), table.Keys[key])
 		}
 		for _, column := range sortedKeys(table.Columns) {
 			validateColumn(add, at+".columns."+column, table.Columns[column])

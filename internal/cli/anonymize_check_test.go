@@ -983,3 +983,45 @@ func TestTheResolutionKeysAreEmptyListsAndNeverNull(t *testing.T) {
 		}
 	}
 }
+
+// prefixed classifies a key/value table by exact names, a prefix and the empty value,
+// which `check` settles from the file alone.
+const prefixed = `anonymize:
+  tables:
+    plugin_settings:
+      discriminator: setting
+      value: payload
+      keys:
+        _cache_*:
+          action: keep
+        _cache_owner_email:
+          action: fake.email
+        "":
+          action: drop
+      columns:
+        id:
+          action: keep
+`
+
+func TestCheckPassesPrefixEntriesAndTheirApprovalOffline(t *testing.T) {
+	root := projectFile(t, prefixed, map[string]string{"staging": "plugin_settings.setting=_cache_*"})
+	env, _, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want success", err)
+	}
+}
+
+func TestCheckRefusesAStarInsideAKeyOffline(t *testing.T) {
+	root := classifiedProject(t, strings.Replace(prefixed, "_cache_*:", "_cache_*_tmp:", 1))
+	env, _, _ := testEnv()
+
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", unreachable))
+
+	if r.Reason != refusal.Invalid {
+		t.Errorf("Reason = %q, want %q", r.Reason, refusal.Invalid)
+	}
+	if !strings.Contains(r.Detail, "write _cache_*") {
+		t.Errorf("Detail = %q, want it to name the prefix to write", r.Detail)
+	}
+}

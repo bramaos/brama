@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/generator"
@@ -88,6 +89,12 @@ func Check(cfg *config.Config, environments []string, drift preset.Drifts, prese
 	reported := map[string]bool{}
 
 	for _, e := range classified {
+		if e.keyed {
+			if detail, malformed := malformedKey(e.field); malformed {
+				add(e.at, detail)
+			}
+		}
+
 		if name, fakes := e.column.Action.Generator(); fakes {
 			// An unknown name is refused here and nowhere later. `fake.e_mail` is a
 			// typo in a committed file, and the safe reading of a typo is that nobody
@@ -182,9 +189,17 @@ func checkApprovals(cfg *config.Config, environments []string, drift preset.Drif
 					"%s names %s as the discriminator, and %s's is %s — write %s.%s=%s",
 					ref, ref.Column, ref.Table, discriminator, ref.Table, discriminator, ref.Key)})
 			case !classified && ref.Keyed():
-				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
-					"%s is not a key this file classifies — approval names what to send as real "+
-						"data, and nothing here says what %s holds", ref, ref.Key)})
+				detail := fmt.Sprintf("%s is not a key this file classifies — approval names what to "+
+					"send as real data", ref)
+				// Approval addresses the entry, not the keys under it, so a key a prefix
+				// covers is answered by approving the prefix, and by nothing narrower.
+				if entry, covered := cfg.Anonymize.Tables[ref.Table].Match(ref.Entry()); covered {
+					detail += fmt.Sprintf(", and %s is classified by %s — write %s.%s=%s",
+						ref.Key, entry, ref.Table, ref.Column, entry)
+				} else {
+					detail += fmt.Sprintf(", and nothing here says what %s holds", ref.Key)
+				}
+				problems = append(problems, Problem{At: at, Detail: detail})
 			case !classified && discriminated(cfg.Anonymize, ref):
 				problems = append(problems, Problem{At: at, Detail: fmt.Sprintf(
 					"%s is classified per key under keys, so approving the column says nothing "+
@@ -201,6 +216,30 @@ func checkApprovals(cfg *config.Config, environments []string, drift preset.Drif
 		}
 	}
 	return problems
+}
+
+// malformedKey says why a `keys` entry cannot mean what it looks like it means.
+func malformedKey(key string) (string, bool) {
+	// Two quote characters are how the file spells the empty value, so an entry that
+	// really is them could not be told apart from it in a path or an Approval.
+	if key == config.EmptyKey {
+		return "a key of two quote characters reads as the empty value, " + config.EmptyKey +
+			", in every path and approval — write \"\" for rows with no value", true
+	}
+	// A `*` only ends a key. Anywhere else it reads as a glob brama does not match,
+	// and the entry would quietly classify one literal key nobody writes.
+	i := strings.Index(key, "*")
+	switch {
+	case i < 0 || i == len(key)-1:
+		return "", false
+	case i == 0:
+		// Cutting `*_email` at its star leaves `*`, which classifies every key there
+		// will ever be. That is not a fix to offer for a typo.
+		return "a * only ends a key, where it matches every key starting with what comes " +
+			"before it — name each key exactly", true
+	}
+	return fmt.Sprintf("a * only ends a key, where it matches every key starting with what "+
+		"comes before it — write %s for that prefix, or name each key exactly", key[:i+1]), true
 }
 
 // entry is one classified thing: an ordinary column, or one Discriminator value.
@@ -239,8 +278,8 @@ func entries(a *config.Anonymize) []entry {
 		t := a.Tables[table]
 		for _, key := range slices.Sorted(maps.Keys(t.Keys)) {
 			out = append(out, entry{
-				at:            at + ".keys." + key,
-				name:          table + "." + t.Discriminator + "=" + key,
+				at:            at + ".keys." + config.SpellKey(key),
+				name:          table + "." + t.Discriminator + "=" + config.SpellKey(key),
 				table:         table,
 				field:         key,
 				discriminator: t.Discriminator,
@@ -278,7 +317,7 @@ func classificationOf(a *config.Anonymize, ref config.ColumnRef) (config.Column,
 		if table.Discriminator != ref.Column {
 			return config.Column{}, false
 		}
-		column, ok := table.Keys[ref.Key]
+		column, ok := table.Keys[ref.Entry()]
 		return column, ok
 	}
 	column, ok := table.Columns[ref.Column]

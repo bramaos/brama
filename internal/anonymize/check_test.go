@@ -450,3 +450,95 @@ func TestCheckNarrowsToTheEnvironmentsItIsGiven(t *testing.T) {
 		t.Errorf("Check(all) = %v, want local's approval reported", problems)
 	}
 }
+
+// options is a key/value table classified by exact names and prefixes together, the way
+// wp_options has to be.
+func options(keys map[string]config.Column) config.Table {
+	return config.Table{Discriminator: "option_name", Value: "option_value", Keys: keys}
+}
+
+// Exact names, prefixes and the empty value classify side by side. None of them is a
+// problem, and each counts as one thing the file classifies.
+func TestCheckAcceptsPrefixAndEmptyEntries(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"wp_options": options(map[string]config.Column{
+			"_transient_*":          {Action: config.Drop},
+			"_transient_doing_cron": {Action: config.Keep},
+			"admin_email":           {Action: "fake.email"},
+			"":                      {Action: config.Drop},
+		}),
+	}, nil)
+
+	summary, problems := anonymize.Check(cfg, nil, nil, nil)
+
+	if len(problems) != 0 {
+		t.Errorf("problems = %v, want none", problems)
+	}
+	if summary.Columns != 4 {
+		t.Errorf("Summary.Columns = %d, want 4", summary.Columns)
+	}
+}
+
+// A `*` only ends a key. Anywhere else it would read as a glob that brama does not
+// match, and the entry would classify one literal key nobody writes. A key of two quote
+// characters is refused too: it is the empty value's spelling, and would read as it.
+func TestCheckRefusesAKeyThatCannotMeanWhatItSays(t *testing.T) {
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"_transient_*_timeout", "write _transient_*"},
+		{"_site_*_*", "write _site_*"},
+		{"*_email", "name each key exactly"},
+		{`""`, `write "" for rows with no value`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			cfg := project(map[string]config.Table{
+				"wp_options": options(map[string]config.Column{tt.key: {Action: config.Drop}}),
+			}, nil)
+
+			problem := only(t, problemsOf(cfg, nil))
+
+			if want := "anonymize.tables.wp_options.keys." + tt.key; problem.At != want {
+				t.Errorf("At = %q, want %q", problem.At, want)
+			}
+			if !strings.Contains(problem.Detail, tt.want) {
+				t.Errorf("Detail = %q, want it to say %q", problem.Detail, tt.want)
+			}
+		})
+	}
+}
+
+// An Approval names a prefix entry as written. It approves the keys that entry answers
+// for, and it says something.
+func TestCheckAcceptsAnApprovalOfAKeptPrefix(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"wp_options": options(map[string]config.Column{
+			"_transient_*": {Action: config.Keep},
+			"":             {Action: config.Keep},
+		}),
+	}, map[string]config.Environment{
+		"staging": approving("wp_options.option_name=_transient_*", `wp_options.option_name=""`),
+	})
+
+	if problems := problemsOf(cfg, names(cfg)); len(problems) != 0 {
+		t.Errorf("problems = %v, want none — both approvals name an entry", problems)
+	}
+}
+
+// Approval addresses what Classification addresses: the entry. A key a prefix covers is
+// not an entry, and the refusal names the one to write instead.
+func TestCheckNamesThePrefixAKeyedApprovalMeant(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"wp_options": options(map[string]config.Column{"_transient_*": {Action: config.Keep}}),
+	}, map[string]config.Environment{
+		"staging": approving("wp_options.option_name=_transient_abc"),
+	})
+
+	problem := only(t, problemsOf(cfg, names(cfg)))
+
+	if !strings.Contains(problem.Detail, "write wp_options.option_name=_transient_*") {
+		t.Errorf("Detail = %q, want it to name the prefix entry to approve", problem.Detail)
+	}
+}

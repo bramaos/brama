@@ -65,7 +65,7 @@ func (f Fallback) Keyed() bool { return f.Discriminator != "" }
 // on the strength of a line `check` calls malformed.
 func (f Fallback) Ref() config.ColumnRef {
 	if f.Keyed() {
-		return config.ColumnRef{Table: f.Table, Column: f.Discriminator, Key: f.Field}
+		return config.ColumnRef{Table: f.Table, Column: f.Discriminator, Key: config.SpellKey(f.Field)}
 	}
 	return config.ColumnRef{Table: f.Table, Column: f.Field}
 }

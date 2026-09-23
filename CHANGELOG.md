@@ -11,6 +11,15 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Classify discriminator values by prefix: a `keys` entry ending in `*` — `_transient_*`
+  — covers every key starting with what comes before it, so a new transient hash no
+  longer leaves a key unclassified. An entry naming the key exactly wins, then the
+  longest prefix. `anonymize check` refuses a `*` anywhere else in a key and names the
+  prefix to write. (#67, #8)
+- Classify the rows with no discriminator value, NULL or empty, under the key `""`. (#67, #8)
+- Approve a prefix entry as written: `wp_options.option_name=_transient_*`. An approval
+  names the entry, not a key under it; `check` refuses `…=_transient_abc` and names the
+  prefix to approve instead. (#67, #8)
 - Match the `wordpress` preset against your project's own `$table_prefix`, so an install
   on `acme_` gets the preset an install on `wp_` always got. The prefix is read out of
   the project's own config — `wp-config.php`, or `.env` and `config/application.php` on

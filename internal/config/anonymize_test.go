@@ -429,6 +429,103 @@ func TestApprovedNeedsNoMatchingTableEntry(t *testing.T) {
 	mustParse(t, body)
 }
 
+// A Discriminator value is classified by the entry that names it exactly, or else by the
+// longest prefix entry that covers it. That is what lets `_transient_*` answer for every
+// hash WordPress invents while `_transient_doing_cron` still says something of its own.
+func TestTableMatchPrefersTheExactEntryThenTheLongestPrefix(t *testing.T) {
+	table := config.Table{
+		Discriminator: "option_name",
+		Value:         "option_value",
+		Keys: map[string]config.Column{
+			"admin_email":           {Action: "fake.email"},
+			"_transient_*":          {Action: config.Drop},
+			"_transient_timeout_*":  {Action: config.Keep},
+			"_transient_doing_cron": {Action: config.Keep},
+			"cron*":                 {Action: config.Drop},
+			"cron":                  {Action: config.Keep},
+			"":                      {Action: config.Drop},
+		},
+	}
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+		ok    bool
+	}{
+		{"an exact name", "admin_email", "admin_email", true},
+		{"a prefix", "_transient_a1b2c3", "_transient_*", true},
+		{"the prefix alone", "_transient_", "_transient_*", true},
+		{"the longer of two prefixes", "_transient_timeout_a1b2c3", "_transient_timeout_*", true},
+		{"an exact name over a prefix covering it", "_transient_doing_cron", "_transient_doing_cron", true},
+		{"an exact name over a prefix of the same length", "cron", "cron", true},
+		{"the empty value", "", "", true},
+		{"a value nothing covers", "siteurl", "", false},
+		{"a value differing only in case", "Admin_email", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := table.Match(tt.value)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("Match(%q) = %q, %v; want %q, %v", tt.value, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+// A table that says nothing about the empty value leaves it Unclassified. NULL is not a
+// value brama may quietly wave through.
+func TestTableMatchLeavesTheEmptyValueToAnEntryThatCoversIt(t *testing.T) {
+	table := config.Table{Keys: map[string]config.Column{"admin_email": {Action: config.Keep}}}
+	if got, ok := table.Match(""); ok {
+		t.Errorf("Match(%q) = %q, true; want no entry", "", got)
+	}
+
+	table.Keys["*"] = config.Column{Action: config.Drop}
+	if got, ok := table.Match(""); got != "*" || !ok {
+		t.Errorf("Match(%q) = %q, %v; want %q, true", "", got, ok, "*")
+	}
+}
+
+// The empty Discriminator value is spelled `""`, in the file and in a sentence: a path
+// ending `keys.` reads as a typo, not as a key.
+func TestAnonymizeSpellsTheEmptyKeyAsQuotes(t *testing.T) {
+	err := parseErr(t, valid+"anonymize:\n  tables:\n    usermeta:\n      discriminator: meta_key\n      value: meta_value\n      keys:\n        \"\": {}\n")
+
+	if want := `anonymize.tables.usermeta.keys."".action is required`; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to contain %q", err, want)
+	}
+}
+
+// An Approval of the empty Discriminator value names the entry as the file writes it.
+func TestApprovedParsesTheEmptyDiscriminatorValue(t *testing.T) {
+	body := strings.Replace(valid,
+		"    url: https://example.local.test\n",
+		"    url: https://example.local.test\n    anonymize:\n      approved:\n        - usermeta.meta_key=\"\"\n", 1)
+	cfg := mustParse(t, body)
+
+	ref := cfg.Environments["local"].Anonymize.Approved[0]
+	if !ref.Keyed() || ref.Entry() != "" {
+		t.Errorf("approved[0] = %+v, want the keyed reference to the empty value", ref)
+	}
+	if got, want := ref.String(), `usermeta.meta_key=""`; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+// An Approval of a prefix entry is the entry as written, `*` and all.
+func TestApprovedParsesAPrefixEntry(t *testing.T) {
+	body := strings.Replace(valid,
+		"    url: https://example.local.test\n",
+		"    url: https://example.local.test\n    anonymize:\n      approved:\n        - wp_options.option_name=_transient_*\n", 1)
+	cfg := mustParse(t, body)
+
+	want := config.ColumnRef{Table: "wp_options", Column: "option_name", Key: "_transient_*"}
+	if got := cfg.Environments["local"].Anonymize.Approved[0]; got != want {
+		t.Errorf("approved[0] = %+v, want %+v", got, want)
+	}
+}
+
 func TestGeneratorIsTheNameAfterFake(t *testing.T) {
 	tests := []struct {
 		action config.Classification

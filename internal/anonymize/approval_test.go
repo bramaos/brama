@@ -289,3 +289,53 @@ func TestForNarrowsToOneDestination(t *testing.T) {
 		t.Errorf("For(staging) = %v, want the staging answer alone", got)
 	}
 }
+
+// An approved prefix `keep` travels real, for every key the prefix answers for.
+func TestEffectiveResolvesAnApprovedPrefix(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"wp_options": options(map[string]config.Column{"_transient_*": {Action: config.Keep}}),
+	}, map[string]config.Environment{"local": approving("wp_options.option_name=_transient_*")})
+
+	if got := anonymize.Effective(cfg, []string{"local"}); len(got) != 0 {
+		t.Errorf("Effective() = %v, want nothing — the prefix is approved", rendered(got))
+	}
+}
+
+// A Generator claims a whole name, and a prefix is not one: nothing claims `email*` the
+// way something claims `billing_email`. So an unapproved prefix `keep` refuses.
+func TestEffectiveLeavesAnUnapprovedPrefixWithNoFallback(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"wp_options": options(map[string]config.Column{
+			"_transient_*": {Action: config.Keep},
+			"email*":       {Action: config.Keep},
+		}),
+	}, map[string]config.Environment{"local": {}})
+
+	got := anonymize.Effective(cfg, []string{"local"})
+
+	want := []string{"local: wp_options.option_name=_transient_*", "local: wp_options.option_name=email*"}
+	if !equal(rendered(got.NoFallback()), want) {
+		t.Errorf("NoFallback() = %v, want %v", rendered(got.NoFallback()), want)
+	}
+}
+
+// The empty Discriminator value is an entry like any other, spelled `""`, and approved
+// by that spelling.
+func TestEffectiveResolvesTheEmptyValueByItsSpelling(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"wp_options": options(map[string]config.Column{"": {Action: config.Keep}}),
+	}, map[string]config.Environment{
+		"local":   {},
+		"staging": approving(`wp_options.option_name=""`),
+	})
+
+	got := anonymize.Effective(cfg, []string{"local", "staging"})
+
+	want := []string{`local: wp_options.option_name=""`}
+	if !equal(rendered(got), want) {
+		t.Fatalf("Effective() = %v, want %v", rendered(got), want)
+	}
+	if ref := got[0].Ref(); !cfg.Environments["staging"].ApprovesRef(ref) {
+		t.Errorf("Ref() = %v, want the reference staging approves", ref)
+	}
+}
