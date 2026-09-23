@@ -209,3 +209,14 @@ func TestAssembleEmptyDatabase(t *testing.T) {
 		t.Errorf("Tables = %+v, want none", got.Tables)
 	}
 }
+
+func TestQuoteDoublesABacktick(t *testing.T) {
+	for in, want := range map[string]string{
+		"meta_key": "`meta_key`",
+		"odd`name": "`odd``name`",
+	} {
+		if got := quote(in); got != want {
+			t.Errorf("quote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}

@@ -307,7 +307,7 @@ func TestCheckResultNamesWhatItChecked(t *testing.T) {
 // reachable is a schemaSource that answers with a fixed Schema, standing in for an
 // environment brama has a route to.
 func reachable(from string, s schema.Schema) schemaSource {
-	return func(_ context.Context, _ *config.Config, environment string) (schema.Schema, error) {
+	return func(_ context.Context, _ *config.Config, environment string, _ map[string]string) (schema.Schema, error) {
 		if environment != from {
 			return schema.Schema{}, errUnreachable
 		}
@@ -400,7 +400,7 @@ func TestCheckSaysColumnCoverageWentUnverified(t *testing.T) {
 func TestCheckFailsWhenAReachableEnvironmentCannotBeRead(t *testing.T) {
 	root := classifiedProject(t, consistent)
 	env, _, _ := testEnv()
-	broken := func(context.Context, *config.Config, string) (schema.Schema, error) {
+	broken := func(context.Context, *config.Config, string, map[string]string) (schema.Schema, error) {
 		return schema.Schema{}, errors.New("information_schema is not readable by this user")
 	}
 
@@ -420,9 +420,9 @@ func TestCheckComparesAgainstOneSchemaAndNamesWhichOne(t *testing.T) {
 	root := classifiedProject(t, consistent)
 	env, _, _ := testEnv()
 	var asked []string
-	counting := func(ctx context.Context, cfg *config.Config, name string) (schema.Schema, error) {
+	counting := func(ctx context.Context, cfg *config.Config, name string, discriminators map[string]string) (schema.Schema, error) {
 		asked = append(asked, name)
-		return reachable("staging", usersAndOrders())(ctx, cfg, name)
+		return reachable("staging", usersAndOrders())(ctx, cfg, name, discriminators)
 	}
 
 	if err := runAnonymizeCheck(t.Context(), env, root, "", counting); err != nil {
@@ -1023,5 +1023,177 @@ func TestCheckRefusesAStarInsideAKeyOffline(t *testing.T) {
 	}
 	if !strings.Contains(r.Detail, "write _cache_*") {
 		t.Errorf("Detail = %q, want it to name the prefix to write", r.Detail)
+	}
+}
+
+// keyed is the consistent classification plus a key/value table classified per key,
+// exactly and by prefix. The table has no column but the two its keys answer for, so
+// nothing here is a `keep` waiting on an approval.
+const keyed = consistent + `    usermeta:
+      discriminator: meta_key
+      value: meta_value
+      keys:
+        billing_email:
+          action: fake.email
+        _transient_*:
+          action: drop
+`
+
+// usermetaSchema is the schema keyed classifies, the usermeta table included.
+func usermetaSchema() schema.Schema {
+	s := usersAndOrders()
+	s.Tables = append(s.Tables, schema.Table{Name: "usermeta", Columns: []schema.Column{
+		{Name: "meta_key", Type: "varchar", Declared: "varchar(255)", Length: 255},
+		{Name: "meta_value", Type: "longtext", Declared: "longtext"},
+	}})
+	return s
+}
+
+// withKeys is a schemaSource that answers from one environment the way schema.Read
+// does: with s, and the values of each Discriminator it was asked for, out of values by
+// table. A Discriminator nobody asked for stays unread, so a test passes only if the
+// command asks.
+func withKeys(from string, s schema.Schema, values map[string][]string) schemaSource {
+	return func(_ context.Context, _ *config.Config, environment string, discriminators map[string]string) (schema.Schema, error) {
+		if environment != from {
+			return schema.Schema{}, errUnreachable
+		}
+		out := schema.Schema{Database: s.Database}
+		for _, t := range s.Tables {
+			if column, ok := discriminators[t.Name]; ok {
+				t.Discriminator = schema.Discriminator{Column: column, Values: values[t.Name]}
+			}
+			out.Tables = append(out.Tables, t)
+		}
+		return out, nil
+	}
+}
+
+// A key/value table's schema is four columns and says nothing about its keys, so the
+// keys read from its Discriminator are what check covers there. Every one nothing
+// classifies refuses, and every one is named — not the first, and not a count.
+func TestCheckRefusesEveryUnclassifiedDiscriminatorValue(t *testing.T) {
+	root := classifiedProject(t, keyed)
+	env, _, _ := testEnv()
+	source := withKeys("staging", usermetaSchema(), map[string][]string{"usermeta": {
+		"", "Billing_Email", "_transient_doing_cron", "billing_email", "stripe_customer_id",
+	}})
+
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", source))
+
+	if r.Reason != refusal.Unclassified {
+		t.Errorf("Reason = %q, want %q", r.Reason, refusal.Unclassified)
+	}
+	for _, want := range []string{
+		`usermeta.meta_key="" has no classification`,
+		"usermeta.meta_key='Billing_Email' has no classification",
+		"usermeta.meta_key='stripe_customer_id' has no classification",
+	} {
+		if !strings.Contains(r.Detail, want) {
+			t.Errorf("Detail = %q, want it to say %q", r.Detail, want)
+		}
+	}
+	for _, classified := range []string{"'billing_email'", "'_transient_doing_cron'"} {
+		if strings.Contains(r.Detail, classified) {
+			t.Errorf("Detail = %q, want %s left out — a keys entry matches it", r.Detail, classified)
+		}
+	}
+
+	// The whole list reaches the machine contract, in the refusal Main renders.
+	var out bytes.Buffer
+	if err := renderer.NewJSON(&out).Refused("anonymize_check", r); err != nil {
+		t.Fatalf("Refused() = %v, want the refusal rendered", err)
+	}
+	var payload struct {
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload.Status != "refused" || payload.Reason != string(refusal.Unclassified) {
+		t.Errorf("status, reason = %q, %q, want refused, unclassified", payload.Status, payload.Reason)
+	}
+	if got := strings.Count(payload.Detail, "has no classification"); got != 3 {
+		t.Errorf("detail names %d keys, want all 3:\n%s", got, payload.Detail)
+	}
+}
+
+// Every key a keys entry matches is a covered key, and a run that read them all says so.
+func TestCheckPassesWhenEveryDiscriminatorValueIsClassified(t *testing.T) {
+	root := classifiedProject(t, keyed)
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+	source := withKeys("staging", usermetaSchema(), map[string][]string{"usermeta": {
+		"_transient_doing_cron", "_transient_timeout_abc", "billing_email",
+	}})
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", source); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want success", err)
+	}
+
+	var payload struct {
+		Status     string `json:"status"`
+		SchemaKeys int    `json:"schema_keys"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload.Status != string(renderer.StatusSuccess) {
+		t.Errorf("status = %q, want success — every column and key is answered for", payload.Status)
+	}
+	if payload.SchemaKeys != 3 {
+		t.Errorf("schema_keys = %d, want the 3 keys read", payload.SchemaKeys)
+	}
+}
+
+// With no environment in reach no key was read, and a key nothing classifies is still
+// unclassified. That is said, beside column coverage, and the status is partial.
+func TestCheckSaysKeyCoverageWentUnverified(t *testing.T) {
+	root := classifiedProject(t, keyed)
+
+	var human bytes.Buffer
+	env := &console{Out: &human, Err: &human, Renderer: renderer.NewHuman(&human, &human)}
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want it to run to completion", err)
+	}
+	for _, want := range []string{"column coverage was not verified", "key coverage was not verified"} {
+		if !strings.Contains(human.String(), want) {
+			t.Errorf("output does not say %q:\n%s", want, human.String())
+		}
+	}
+
+	var out bytes.Buffer
+	env = &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want it to run to completion", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload["status"] != string(renderer.StatusPartial) {
+		t.Errorf("status = %v, want partial — no key was read", payload["status"])
+	}
+	if payload["schema"] != nil {
+		t.Errorf("schema = %v, want null — no environment answered", payload["schema"])
+	}
+	if payload["schema_keys"] != float64(0) {
+		t.Errorf("schema_keys = %v, want 0 — nothing was counted", payload["schema_keys"])
+	}
+}
+
+// A file with no key/value table has no keys to leave unverified, and says nothing about
+// them.
+func TestCheckSaysNothingAboutKeysWhereNothingIsKeyed(t *testing.T) {
+	root := classifiedProject(t, consistent)
+	env, out, _ := testEnv()
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", unreachable); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want it to run to completion", err)
+	}
+	if strings.Contains(out.String(), "key coverage") {
+		t.Errorf("output mentions key coverage on a file that keys nothing:\n%s", out.String())
 	}
 }

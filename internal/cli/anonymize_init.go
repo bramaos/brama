@@ -197,7 +197,9 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 		named = shipped.Name
 	}
 
-	read, from, err := readSchema(ctx, cfg, environments, source)
+	// No Discriminator values: init classifies columns, and the keys of a table the
+	// Preset keys are `check`'s to read, where they refuse.
+	read, from, err := readSchema(ctx, cfg, environments, source, nil)
 	if err != nil {
 		return err
 	}

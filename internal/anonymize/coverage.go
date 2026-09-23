@@ -24,10 +24,19 @@ type Coverage struct {
 	// its name alone, because the caller that acts on this — `anonymize init` — picks
 	// a Generator by name *and* type, and a name on its own cannot be claimed.
 	Unclassified []Uncovered
+	// Keys is how many distinct Discriminator values the Schema holds for the tables
+	// the file classifies per key. It is zero where none were read.
+	Keys int
+	// UnclassifiedKeys are the Discriminator values no `keys` entry matches, table by
+	// table in Schema order and in byte order within one. Every one is listed: brama
+	// does not group them or guess a prefix for them, because a `*` is a decision about
+	// every key a plugin will ever write, and that is a human's to make.
+	UnclassifiedKeys []UncoveredKey
 }
 
-// Complete reports whether every column of the Schema is answered for.
-func (c Coverage) Complete() bool { return len(c.Unclassified) == 0 }
+// Complete reports whether every column of the Schema, and every Discriminator value
+// read with it, is answered for.
+func (c Coverage) Complete() bool { return len(c.Unclassified) == 0 && len(c.UnclassifiedKeys) == 0 }
 
 // Uncovered is one column the Schema has and the Classification does not.
 type Uncovered struct {
@@ -39,13 +48,35 @@ type Uncovered struct {
 
 func (u Uncovered) String() string { return u.Table + "." + u.Column.Name }
 
+// UncoveredKey is one Discriminator value the Schema holds and the Classification does
+// not.
+type UncoveredKey struct {
+	Table         string
+	Discriminator string
+	// Value is the key as the database holds it, byte for byte. "" is a row with no
+	// key, NULL or empty.
+	Value string
+}
+
+// String is the key the way a Refusal names it: `wp_usermeta.meta_key='stripe_customer_id'`.
+// The empty value is spelled as the file spells its entry, `wp_usermeta.meta_key=""`, so
+// what the Refusal names is what a person writes.
+func (k UncoveredKey) String() string {
+	if k.Value == "" {
+		return k.Table + "." + k.Discriminator + "=" + config.EmptyKey
+	}
+	return k.Table + "." + k.Discriminator + "='" + k.Value + "'"
+}
+
 // Cover compares a Schema against the committed Classification.
 //
 // It answers the two questions a file cannot answer about itself: which columns the
 // database has that nobody classified, and whether a Generator the file names could
 // actually fill the column it was given. The second is the refusal ADR 0013 promises —
 // `fake.email` on a `varchar(20)` stops in the editor, rather than truncating or
-// erroring partway through a dump on a production Server.
+// erroring partway through a dump on a production Server. Where the Schema carries a
+// Discriminator's values, it answers the first question for them too: which keys the
+// data holds that no `keys` entry matches.
 //
 // It is deliberately separate from Check, and returns the comparison as data rather
 // than only as problems, because `anonymize init` walks the same ground: what init
@@ -67,6 +98,7 @@ func Cover(a *config.Anonymize, s schema.Schema) (Coverage, []Problem) {
 
 	for _, t := range s.Tables {
 		classified := a.Tables[t.Name]
+		coverKeys(&coverage, classified, t)
 		for _, col := range t.Columns {
 			// A generated column cannot be written to at all, so its absence from the
 			// file is not a decision anybody failed to make.
@@ -77,8 +109,7 @@ func Cover(a *config.Anonymize, s schema.Schema) (Coverage, []Problem) {
 
 			// A key/value table classifies its value column one Discriminator value at
 			// a time, so neither that column nor the Discriminator selecting for it is
-			// answered for by a `columns` entry. Whether every key present in the data
-			// has one is a question about rows, and a Schema holds none.
+			// answered for by a `columns` entry. Its keys are, by coverKeys.
 			if structural(classified, col.Name) {
 				continue
 			}
@@ -111,6 +142,26 @@ func Cover(a *config.Anonymize, s schema.Schema) (Coverage, []Problem) {
 	}
 
 	return coverage, problems
+}
+
+// coverKeys counts the Discriminator values read for one table, and adds every one no
+// `keys` entry matches to the coverage.
+//
+// Values read off a column the file does not call the table's Discriminator are not
+// keys of it. The file's Discriminator is what its `keys` entries are about, and
+// matching another column's values against them would answer a question nobody asked.
+func coverKeys(coverage *Coverage, classified config.Table, t schema.Table) {
+	if classified.Discriminator == "" || t.Discriminator.Column != classified.Discriminator {
+		return
+	}
+	for _, value := range t.Discriminator.Values {
+		coverage.Keys++
+		if _, ok := classified.Match(value); !ok {
+			coverage.UnclassifiedKeys = append(coverage.UnclassifiedKeys, UncoveredKey{
+				Table: t.Name, Discriminator: classified.Discriminator, Value: value,
+			})
+		}
+	}
 }
 
 // structural reports whether a column is the Discriminator of a key/value table, or

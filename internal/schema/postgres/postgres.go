@@ -11,8 +11,10 @@
 // information_schema hands back the parts and leaves reassembling "numeric(10,2)" as
 // guesswork.
 //
-// Every query is parameterised on the schema name, and no identifier is ever
-// interpolated into SQL. Four queries, run once each, rather than one per table — a
+// Every catalogue query is parameterised on the schema name, and no identifier is
+// interpolated into one. DiscriminatorValues reads a table rather than the catalogue,
+// and a table cannot be a parameter, so it quotes the identifiers it is given. Four
+// catalogue queries, run once each, rather than one per table — a
 // production database has hundreds of tables, and a hundred round trips over a
 // connection the Shim opened on a rented Server is a visible wait.
 //
@@ -36,6 +38,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/bramaos/brama/internal/schema"
 	"github.com/bramaos/brama/internal/schema/catalog"
@@ -89,6 +92,36 @@ func (i *Introspector) Introspect(ctx context.Context) (schema.Schema, error) {
 	}
 
 	return assemble(i.schema, tables, columns, keys, foreignKeys), nil
+}
+
+// DiscriminatorValues returns the distinct values of column in table, compared as
+// bytes and sorted by them, with NULL and empty both read as "".
+//
+// COLLATE "C" is what makes DISTINCT byte-exact: a nondeterministic collation, a
+// case-insensitive ICU one, returns one of `Billing_Email` and `billing_email` and
+// drops the other. The cast to text lets a Discriminator of any type take a collation
+// at all. COALESCE comes first, so a NULL and an empty value are one row rather than
+// two that read the same.
+func (i *Introspector) DiscriminatorValues(ctx context.Context, table, column string) ([]string, error) {
+	statement := fmt.Sprintf(
+		`SELECT DISTINCT COALESCE(%s::text, '') COLLATE "C" AS v FROM %s.%s ORDER BY v`,
+		quote(column), quote(i.schema), quote(table))
+	return catalog.Query(ctx, i.db, "the values of "+table+"."+column, statement, scanValue)
+}
+
+// quote is an identifier as PostgreSQL reads it between double quotes, where a double
+// quote is written twice. Quoted, it is also taken as written rather than folded to
+// lower case, which is what the catalogue reported it as.
+func quote(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func scanValue(rows *sql.Rows) (string, error) {
+	var value string
+	if err := rows.Scan(&value); err != nil {
+		return "", fmt.Errorf("reading a value: %w", err)
+	}
+	return value, nil
 }
 
 // requireSchema fails when the named schema does not exist.

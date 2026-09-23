@@ -267,3 +267,98 @@ func equal(got, want []string) bool {
 	}
 	return true
 }
+
+// keyValue is a usermeta table whose Discriminator holds the given values, as a Schema
+// read from a reachable Environment carries them.
+func keyValue(values ...string) schema.Table {
+	t := table("usermeta", bigint("umeta_id"), varchar("meta_key", 255), varchar("meta_value", 20))
+	t.Discriminator = schema.Discriminator{Column: "meta_key", Values: values}
+	return t
+}
+
+// uncoveredKeys names the unclassified Discriminator values the way a Refusal does.
+func uncoveredKeys(c anonymize.Coverage) []string {
+	out := make([]string, 0, len(c.UnclassifiedKeys))
+	for _, k := range c.UnclassifiedKeys {
+		out = append(out, k.String())
+	}
+	return out
+}
+
+// A key/value table's Schema says nothing about which keys it holds, so the values read
+// from its Discriminator are covered the way columns are: every one a `keys` entry
+// matches, exactly or by prefix, and every other one named.
+func TestCoverReportsEveryDiscriminatorValueNoKeysEntryMatches(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_key",
+			Value:         "meta_value",
+			Keys: map[string]config.Column{
+				"billing_phone":  {Action: "fake.phone"},
+				"_transient_*":   {Action: config.Drop},
+				"":               {Action: config.Drop},
+				"session_tokens": {Action: config.Drop},
+			},
+			Columns: map[string]config.Column{"umeta_id": {Action: config.Keep}},
+		},
+	}, nil)
+
+	coverage, problems := anonymize.Cover(cfg.Anonymize, schemaOf(keyValue(
+		"", "Billing_Phone", "_transient_abc", "billing_phone", "session_tokens", "stripe_customer_id",
+	)))
+
+	if len(problems) != 0 {
+		t.Fatalf("Cover() = %v, want no problems", problems)
+	}
+	want := []string{"usermeta.meta_key='Billing_Phone'", "usermeta.meta_key='stripe_customer_id'"}
+	if got := uncoveredKeys(coverage); !equal(got, want) {
+		t.Errorf("UnclassifiedKeys = %v, want %v", got, want)
+	}
+	if coverage.Keys != 6 {
+		t.Errorf("Keys = %d, want every value the Discriminator holds", coverage.Keys)
+	}
+	if coverage.Complete() {
+		t.Error("Complete() = true, want an unclassified key to leave coverage incomplete")
+	}
+}
+
+// A row with no key is classified like any other, and named like one when nothing is.
+func TestCoverNamesTheEmptyDiscriminatorValue(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_key",
+			Value:         "meta_value",
+			Keys:          map[string]config.Column{"nickname": {Action: config.Keep}},
+			Columns:       map[string]config.Column{"umeta_id": {Action: config.Keep}},
+		},
+	}, nil)
+
+	coverage, _ := anonymize.Cover(cfg.Anonymize, schemaOf(keyValue("", "nickname")))
+
+	if got, want := uncoveredKeys(coverage), []string{`usermeta.meta_key=""`}; !equal(got, want) {
+		t.Errorf("UnclassifiedKeys = %v, want %v", got, want)
+	}
+}
+
+// Values read from a column the file does not call its Discriminator say nothing about
+// the file's keys, and a table the file does not key has no keys to answer for.
+func TestCoverIgnoresValuesOfAColumnThatIsNotTheDiscriminator(t *testing.T) {
+	cfg := project(map[string]config.Table{
+		"usermeta": {
+			Discriminator: "meta_name",
+			Value:         "meta_value",
+			Keys:          map[string]config.Column{"nickname": {Action: config.Keep}},
+			Columns: map[string]config.Column{
+				"umeta_id": {Action: config.Keep},
+				"meta_key": {Action: config.Keep},
+			},
+		},
+	}, nil)
+
+	coverage, _ := anonymize.Cover(cfg.Anonymize, schemaOf(keyValue("stripe_customer_id")))
+
+	if len(coverage.UnclassifiedKeys) != 0 || coverage.Keys != 0 {
+		t.Errorf("Keys = %d, UnclassifiedKeys = %v, want nothing read off another column",
+			coverage.Keys, uncoveredKeys(coverage))
+	}
+}

@@ -1,4 +1,5 @@
-// Package catalog is the one loop that reads a database's catalogue.
+// Package catalog is the one loop that reads a database's catalogue, and the
+// distinct values of a Discriminator: the one read of rows an introspector makes.
 //
 // It knows no dialect. Which catalogue holds the answer, and what to ask it, belongs
 // to the introspector for that database system; what is here is the part that would

@@ -5,8 +5,10 @@
 // works on a Server where WordPress is broken, where WP-CLI was never installed, and
 // on a database no framework brama has an Adapter for.
 //
-// Every query is parameterised on the database name, and no identifier is ever
-// interpolated into SQL. Four queries, run once each, rather than one per table —
+// Every catalogue query is parameterised on the database name, and no identifier is
+// interpolated into one. DiscriminatorValues reads a table rather than the
+// catalogue, and a table cannot be a parameter, so it quotes the identifiers it is
+// given. Four catalogue queries, run once each, rather than one per table —
 // a WooCommerce database has hundreds of tables, and a hundred round trips over a
 // connection the Shim opened on a rented Server is a visible wait.
 //
@@ -20,6 +22,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/bramaos/brama/internal/schema"
 	"github.com/bramaos/brama/internal/schema/catalog"
@@ -71,6 +74,34 @@ func (i *Introspector) Introspect(ctx context.Context) (schema.Schema, error) {
 	}
 
 	return assemble(i.database, tables, columns, keys, foreignKeys), nil
+}
+
+// DiscriminatorValues returns the distinct values of column in table, compared as
+// bytes and sorted by them, with NULL and empty both read as "".
+//
+// The cast to BINARY is what makes DISTINCT byte-exact. WordPress's own tables are
+// created case-insensitive, and DISTINCT under that collation returns one of
+// `Billing_Email` and `billing_email` and drops the other. COALESCE comes first, so a
+// NULL and an empty value are one row rather than two that read the same.
+func (i *Introspector) DiscriminatorValues(ctx context.Context, table, column string) ([]string, error) {
+	statement := fmt.Sprintf(
+		"SELECT DISTINCT CAST(COALESCE(%s, '') AS BINARY) AS v FROM %s.%s ORDER BY v",
+		quote(column), quote(i.database), quote(table))
+	return catalog.Query(ctx, i.db, "the values of "+table+"."+column, statement, scanValue)
+}
+
+// quote is an identifier as MySQL reads it between backticks, where a backtick is
+// written twice.
+func quote(identifier string) string {
+	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
+}
+
+func scanValue(rows *sql.Rows) (string, error) {
+	var value []byte
+	if err := rows.Scan(&value); err != nil {
+		return "", fmt.Errorf("reading a value: %w", err)
+	}
+	return string(value), nil
 }
 
 // requireDatabase fails when the named database does not exist, or exists and this

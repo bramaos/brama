@@ -46,6 +46,9 @@ type AnonymizeCheckResult struct {
 	// separate so that "nothing is unclassified" can never be read off a run that
 	// never saw a column list.
 	Coverage *anonymize.Coverage
+	// Keyed reports whether the file classifies any table per key. Its keys are read
+	// with the Schema, so where none was read they went unverified besides columns.
+	Keyed bool
 }
 
 func (r *AnonymizeCheckResult) Action() string { return "anonymize_check" }
@@ -112,8 +115,12 @@ func (r *AnonymizeCheckResult) Headline() string {
 
 	switch r.coverage() {
 	case coverageComplete:
-		return fmt.Sprintf("%s is consistent — %s, covering every column %s has",
-			filepath.Base(r.Path), classifies, r.SchemaFrom)
+		every := "every column"
+		if r.Coverage.Keys > 0 {
+			every = "every column and key"
+		}
+		return fmt.Sprintf("%s is consistent — %s, covering %s %s has",
+			filepath.Base(r.Path), classifies, every, r.SchemaFrom)
 	case coverageIncomplete:
 		return fmt.Sprintf("%s holds together, but %s of %s %s unclassified",
 			filepath.Base(r.Path), plural(len(r.Coverage.Unclassified), "column"), r.SchemaFrom,
@@ -259,8 +266,13 @@ func theFilesAnswer(n int) string {
 func (r *AnonymizeCheckResult) coverageNotes() []string {
 	switch r.coverage() {
 	case coverageUnread:
-		return []string{"column coverage was not verified — this run read no schema, " +
+		notes := []string{"column coverage was not verified — this run read no schema, " +
 			"and a column the database has and this file does not is still unclassified"}
+		if r.Keyed {
+			notes = append(notes, "key coverage was not verified — this run read no keys, and a key "+
+				"the data holds and no keys entry matches is still unclassified")
+		}
+		return notes
 	case coverageIncomplete:
 		return append(
 			[]string{fmt.Sprintf("unclassified in %s — a pull refuses until each one is decided:", r.SchemaFrom)},
@@ -301,22 +313,27 @@ func (r *AnonymizeCheckResult) Fields() []renderer.Field {
 	// every run. Which one it is reading is what `schema` and the notes answer: where
 	// the comparison was not a whole answer these are zero because nothing was
 	// counted, not because nothing was found.
-	var columns, unclassified int
+	//
+	// No count of unclassified keys: a run that found one refused, so on every run that
+	// gets this far it would be zero.
+	var columns, unclassified, keys int
 	if r.coverage().verified() {
-		columns, unclassified = r.Coverage.Columns, len(r.Coverage.Unclassified)
+		columns, unclassified, keys = r.Coverage.Columns, len(r.Coverage.Unclassified), r.Coverage.Keys
 	}
 	return fields.
 		Add("schema_columns", "Columns in the schema", columns).
-		Add("unclassified_columns", "Unclassified", unclassified)
+		Add("unclassified_columns", "Unclassified", unclassified).
+		Add("schema_keys", "Keys in the schema", keys)
 }
 
-// schemaSource reads the Schema of one Environment.
+// schemaSource reads the Schema of one Environment, with the values of each
+// Discriminator named in discriminators, table to column, as schema.Read reads them.
 //
 // It is a seam rather than a call because reaching a database is the part of `check`
 // that cannot happen everywhere `check` runs, and the command has to behave the same
 // either way: a source that answers errUnreachable is the ordinary case on a CI
 // runner, not a failure.
-type schemaSource func(ctx context.Context, cfg *config.Config, environment string) (schema.Schema, error)
+type schemaSource func(ctx context.Context, cfg *config.Config, environment string, discriminators map[string]string) (schema.Schema, error)
 
 // errUnreachable is a schemaSource saying there is no route to this Environment's
 // database. It is not an error the command fails on — it is the answer that makes
@@ -330,7 +347,7 @@ var errUnreachable = errors.New("no route to this environment's database")
 // goes through the Shim. Until then every Environment answers errUnreachable and
 // `check` reports column coverage as unverified — which is a state it says out loud,
 // and the reason Status is partial rather than success.
-func unreachable(context.Context, *config.Config, string) (schema.Schema, error) {
+func unreachable(context.Context, *config.Config, string, map[string]string) (schema.Schema, error) {
 	return schema.Schema{}, errUnreachable
 }
 
@@ -355,9 +372,12 @@ func newAnonymizeCheckCmd(env *console) *cobra.Command {
 			"It writes nothing, and it runs on a CI runner with no route to production.\n" +
 			"Where an environment is reachable it also reads that database's schema and\n" +
 			"compares the two: which columns nothing classifies, and whether a generator\n" +
-			"can fill the column it was given. Where none is, it says column coverage went\n" +
-			"unverified rather than reporting a clean bill of health it could not earn.\n\n" +
-			"Exits 42 when the file is inconsistent — nothing went wrong, a guardrail held.",
+			"can fill the column it was given. On a table classified per key it reads the\n" +
+			"keys the discriminator holds, byte for byte, and names every one no keys entry\n" +
+			"matches. Where none is, it says column and key coverage went unverified rather\n" +
+			"than reporting a clean bill of health it could not earn.\n\n" +
+			"Exits 42 when the file is inconsistent or a key is unclassified — nothing went\n" +
+			"wrong, a guardrail held.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -410,6 +430,13 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 	if len(read.Problems) > 0 {
 		return refusal.New(refusal.Invalid, problemDetail(read.Problems), "")
 	}
+	// An Unclassified key refuses, as anything Unclassified does (ADR 0003). Unlike a
+	// column it has no `anonymize init` to offer it an answer: which keys a prefix should
+	// cover is a decision about every key a plugin will ever write, and a person makes it
+	// in the file.
+	if read.Coverage != nil && len(read.Coverage.UnclassifiedKeys) > 0 {
+		return refusal.New(refusal.Unclassified, keysDetail(read.Coverage.UnclassifiedKeys), "")
+	}
 
 	// What each destination would receive, which is Classification and Approval read
 	// together. It is reported rather than refused: `check` validates the file, and a
@@ -425,6 +452,7 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 		Fallbacks:    anonymize.Effective(read.Resolved, environments),
 		SchemaFrom:   read.SchemaFrom,
 		Coverage:     read.Coverage,
+		Keyed:        len(read.Discriminators) > 0,
 	}
 
 	// Unclassified columns are reported, not refused. Whether `check` stops on them is
@@ -451,6 +479,9 @@ type inspection struct {
 	Drift preset.Drifts
 	// Summary counts what the file classifies.
 	Summary anonymize.Summary
+	// Discriminators names each table the file classifies per key, and the
+	// Discriminator whose values were read, or would have been, with the Schema.
+	Discriminators map[string]string
 	// SchemaFrom names the Environment whose Schema was read, empty when none was in
 	// reach.
 	SchemaFrom string
@@ -498,7 +529,8 @@ func inspect(ctx context.Context, cfg *config.Config, root string, environments 
 	// The Schema is read before the file is counted rather than after it. What a Preset
 	// covers is the tables this database has, and a count taken without that is the
 	// headline overstating itself on every project the Preset half-fits.
-	read, from, err := readSchema(ctx, cfg, environments, source)
+	out.Discriminators = discriminators(resolved.Anonymize)
+	read, from, err := readSchema(ctx, cfg, environments, source, out.Discriminators)
 	if err != nil {
 		return inspection{}, err
 	}
@@ -532,9 +564,9 @@ func inspect(ctx context.Context, cfg *config.Config, root string, environments 
 // database that answered and then could not be read is not the same as no database,
 // and quietly carrying on would report column coverage as unverified when it was in
 // fact unread for a reason someone can fix.
-func readSchema(ctx context.Context, cfg *config.Config, environments []string, source schemaSource) (schema.Schema, string, error) {
+func readSchema(ctx context.Context, cfg *config.Config, environments []string, source schemaSource, discriminators map[string]string) (schema.Schema, string, error) {
 	for _, name := range environments {
-		read, err := source(ctx, cfg, name)
+		read, err := source(ctx, cfg, name, discriminators)
 		if errors.Is(err, errUnreachable) {
 			continue
 		}
@@ -544,6 +576,36 @@ func readSchema(ctx context.Context, cfg *config.Config, environments []string, 
 		return read, name, nil
 	}
 	return schema.Schema{}, "", nil
+}
+
+// discriminators names each table a Classification keys, and the Discriminator whose
+// values say which keys the table holds.
+func discriminators(a *config.Anonymize) map[string]string {
+	out := map[string]string{}
+	if a == nil {
+		return out
+	}
+	for name, t := range a.Tables {
+		if t.Discriminator != "" {
+			out[name] = t.Discriminator
+		}
+	}
+	return out
+}
+
+// keysDetail is the Refusal's detail for Unclassified keys — one sentence for one, a
+// block for several. Every key is listed, however many there are: grouping them under a
+// guessed prefix is a decision, and cutting the list short sends somebody back for the
+// rest one CI run at a time.
+func keysDetail(keys []anonymize.UncoveredKey) string {
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k.String()+" has no classification")
+	}
+	if len(lines) == 1 {
+		return lines[0]
+	}
+	return fmt.Sprintf("%d keys have no classification:\n  - %s", len(lines), strings.Join(lines, "\n  - "))
 }
 
 // environmentsFor is every Environment, or the one --env named. Both anonymize

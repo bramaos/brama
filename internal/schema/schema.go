@@ -6,6 +6,10 @@
 // has to be able to make every one of them without reading a single value out of
 // production.
 //
+// The one exception is a Discriminator's distinct values. A key/value table's
+// Classification is decided per key, and which keys exist is a question only its rows
+// can answer. See docs/adr/0017-discriminator-values-are-read-from-production.md.
+//
 // The model is the same whichever database answered. MySQL and PostgreSQL disagree
 // about nearly everything below this line — which catalog holds the answer, what a
 // type is called, how a unique constraint is spelled — and an Introspector's job is
@@ -27,6 +31,43 @@ import (
 // churn no reviewer could read past.
 type Introspector interface {
 	Introspect(ctx context.Context) (Schema, error)
+	// DiscriminatorValues returns the distinct values of one column of one table,
+	// compared as bytes and sorted by them, with NULL and empty both read as "", once.
+	//
+	// Bytes, because a collation that folds `Billing_Email` into `billing_email` would
+	// hide one spelling behind the other, and the hidden one is a key nobody
+	// classified. It is the one read of rows an Introspector makes, and it is only ever
+	// asked of a Discriminator: never of the column its values select.
+	DiscriminatorValues(ctx context.Context, table, column string) ([]string, error)
+}
+
+// Read introspects a database and reads the values of each Discriminator named in
+// discriminators, table to column, into the table it belongs to.
+//
+// A Discriminator on a table or a column the database does not have is not read.
+// There are no rows there to classify, and asking would be an error about a table
+// that is simply absent from this Environment.
+func Read(ctx context.Context, i Introspector, discriminators map[string]string) (Schema, error) {
+	s, err := i.Introspect(ctx)
+	if err != nil {
+		return Schema{}, err
+	}
+	for n := range s.Tables {
+		t := &s.Tables[n]
+		column, ok := discriminators[t.Name]
+		if !ok {
+			continue
+		}
+		if _, ok := t.Column(column); !ok {
+			continue
+		}
+		values, err := i.DiscriminatorValues(ctx, t.Name, column)
+		if err != nil {
+			return Schema{}, err
+		}
+		t.Discriminator = Discriminator{Column: column, Values: values}
+	}
+	return s, nil
 }
 
 // Schema is the structure of one database.
@@ -53,6 +94,19 @@ type Table struct {
 	// ForeignKeys are the edges this table owns in the foreign key graph. Only the
 	// referencing side records an edge; Dependents walks it the other way.
 	ForeignKeys []ForeignKey
+	// Discriminator is what the table's Discriminator holds, and zero on every table
+	// nobody asked about. It is the one place a Schema holds rows.
+	Discriminator Discriminator
+}
+
+// Discriminator is the distinct values of the column that selects which
+// Classification applies to a row of a key/value table: `wp_usermeta.meta_key`.
+type Discriminator struct {
+	// Column is the Discriminator's name, and empty where none was read.
+	Column string
+	// Values are its distinct values, compared as bytes and sorted by them. A row with
+	// NULL or an empty value contributes "", once.
+	Values []string
 }
 
 // Column is one column, described as far as Anonymization needs it and no further.

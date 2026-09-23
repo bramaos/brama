@@ -11,6 +11,14 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Refuse every discriminator value nothing classifies: where `anonymize check` reads an
+  environment's schema it also reads the keys each discriminator holds, and exits 42
+  naming every key no `keys` entry matches — `wp_usermeta.meta_key='stripe_customer_id'
+  has no classification`. Keys are compared as bytes, so `Billing_Email` is not
+  `billing_email`, and a NULL or empty key is named `""`, as the file spells it. Where no
+  environment is reachable, `check` says key coverage went unverified beside column
+  coverage. `--json` reports the keys read as `schema_keys`. The keys are read, never the
+  values they select. (#69, #8)
 - Classify discriminator values by prefix: a `keys` entry ending in `*` — `_transient_*`
   — covers every key starting with what comes before it, so a new transient hash no
   longer leaves a key unclassified. An entry naming the key exactly wins, then the
