@@ -87,7 +87,7 @@ func newInitCmd(env *console) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "init",
+		Use:   initVerb,
 		Short: "Write a starting brama.yaml for this project",
 		Long: "Detect the adapter and where its parts live, then write a starting brama.yaml.\n\n" +
 			"It writes no secrets and no classification: `brama anonymize init` owns the\n" +

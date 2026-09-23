@@ -277,3 +277,59 @@ func TestJSONIgnoresTheAbsenceWording(t *testing.T) {
 		t.Errorf("user = %v, want null", value)
 	}
 }
+
+// A contract-only field is for the caller alone. The facts a person needs reach them
+// through the notes, in prose, and a list of names in the padded table would be the same
+// facts twice in the form that reads worst.
+func TestAContractOnlyFieldIsForTheCallerAndNotTheTerminal(t *testing.T) {
+	fields := renderer.Fields{}.
+		Add("tables", "Tables", 63).
+		AddContractOnly("drifted", []string{"wp_users.user_email"})
+
+	var out, errOut bytes.Buffer
+	human := &fakeResult{
+		status: renderer.StatusSuccess,
+		fields: fields,
+		notes:  []string{"one column drifted — wp_users.user_email"},
+	}
+	if err := renderer.NewHuman(&out, &errOut).Result(human); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	if strings.Contains(body, "drifted —") == false {
+		t.Errorf("the note a person reads instead is missing:\n%s", body)
+	}
+	if strings.Count(body, "wp_users.user_email") != 1 {
+		t.Errorf("the contract-only field reached the terminal:\n%s", body)
+	}
+
+	var contract bytes.Buffer
+	if err := renderer.NewJSON(&contract).Result(&fakeResult{status: renderer.StatusSuccess, fields: fields}); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(contract.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if list, ok := got["drifted"].([]any); !ok || len(list) != 1 {
+		t.Errorf("drifted = %v, want the caller's list carried whole", got["drifted"])
+	}
+}
+
+// It takes no label, so it cannot widen the padding every other label is aligned to.
+func TestAContractOnlyFieldDoesNotPadTheHumanTable(t *testing.T) {
+	var out, errOut bytes.Buffer
+	r := &fakeResult{
+		status: renderer.StatusSuccess,
+		fields: renderer.Fields{}.
+			Add("tables", "Tables", 63).
+			AddContractOnly("a_very_long_contract_only_key_indeed", []string{}),
+	}
+
+	if err := renderer.NewHuman(&out, &errOut).Result(r); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "  Tables  63") {
+		t.Errorf("the table was padded to a label nothing renders:\n%s", out.String())
+	}
+}

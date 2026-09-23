@@ -81,17 +81,82 @@ that word names a weaker, reversible thing Brama deliberately does not do.
 
 **Classification**:
 The recorded decision of what happens to a column's values during Anonymization. Exactly
-one of `fake`, `keep`, or `drop`.
+one of `fake.<generator>`, `keep`, or `drop`, written as a column's `action`. `fake` alone
+is not one: which Generator fabricates the value is part of the decision.
 _Avoid_: rule, policy, mapping, tag
+
+**Generator**:
+The named recipe a `fake` Classification fabricates its value with — `fake.email`,
+`fake.full_name`. Brama owns the vocabulary, and a Generator declares which column types and
+names it claims, so nothing is ever fabricated by resemblance.
+_Avoid_: faker, formatter, strategy, and provider — that word already names an
+infrastructure vendor.
+
+**Correlation group**:
+A set of columns sharing one identity, so a real value occurring in all of them becomes the
+same fabricated value in all of them and the joins between them survive Anonymization.
+_Avoid_: link, alias, identity map, seed
+
+**Approval**:
+An Environment's permission to receive the real values of a `keep` column, or of one
+Discriminator value — `users.display_name`, or `wp_usermeta.meta_key=admin_color`. Distinct
+from Classification: Classification settles what a column means, Approval settles where its
+real values may go. Only a human grants one. It addresses exactly what Classification
+addresses, so an answer is never broader than the question it answers.
+_Avoid_: consent, exception, allowlist, override
+
+**Substitution**:
+What an Environment receives in place of the real values of a `keep` column, or of a
+`keep` Discriminator value, when it holds no Approval for that one: the Classification the
+Generator claiming it would have given it. Derived on every run from Classification plus
+Approval, never written down, so a column carries one `action` and no per-destination
+shadow of it. Where no Generator claims
+the column there is no Substitution and the operation refuses — Brama may reduce exposure
+by derivation, it may not invent destructive policy. Said of the value; "falls back" is
+said of the resolution that produces it, and a column nothing claims is one with no
+fallback.
+_Avoid_: default, downgrade, override, redaction
 
 **Discriminator**:
 The column whose value selects which Classification applies to a row, for tables that
-store many kinds of value in one column — `wp_usermeta.meta_key`.
+store many kinds of value in one column — `wp_usermeta.meta_key`. The column it selects
+*for* is named beside it as the table's `value` — `wp_usermeta.meta_value`.
 _Avoid_: key column, EAV key, type column
 
 **Preset**:
-The Classification an Adapter ships for the tables it already knows.
+The Classification an Adapter ships for the tables it already knows. Knowledge, never
+Approval: a Preset can say a column holds a public display name and still authorize no
+Environment to receive it.
 _Avoid_: template, profile, defaults
+
+**Table prefix**:
+What a project's own tables are named with — WordPress spells it `$table_prefix`, and `wp_`
+is only its most common value. A Preset knows which tables a framework creates and not what
+this install calls them, so the prefix is read out of the project's own config by its
+Adapter, every time a Preset is resolved, and is never recorded in `brama.yaml`. One Brama
+cannot determine is a Refusal: a Preset applied under a guessed prefix classifies whatever
+table sorted into the accounts table's place.
+_Avoid_: namespace, schema, table name
+
+**Preset drift**:
+A column the Preset and the recorded Classification disagree about, once upgrading Brama
+has changed what the Preset says. The stricter of the two wins: a Preset moving a column
+off `keep` is applied on its own, a Preset moving one onto `keep` is held until a human
+passes it through review. The record is the baseline, so there is no version to pin and no
+history to keep. Always said with "Preset" — drift between Environments is a different
+thing and not this one.
+_Avoid_: conflict, divergence, staleness, upgrade
+
+**Review**:
+Reconciling the recorded Classification with what Brama would actually do, and the only
+thing that writes `brama.yaml`'s anonymize block after `init` bootstrapped it. It divides
+a run in two and never merges the halves: what narrows exposure — a Preset tightening, a
+column a migration added that a Generator claims — is applied without asking and listed;
+what widens it — a held Preset loosening, a `keep` column or Discriminator value the
+destination has not approved — is named and left for a human. With no terminal the second
+half is handed back as the `review_required` Refusal.
+_Avoid_: reconcile, sync, update, resolve — resolution is what a Pull computes, not what
+a person decides
 
 **Unclassified**:
 A column, or a Discriminator value, found in the source with no Classification. Causes a

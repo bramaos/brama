@@ -170,6 +170,8 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	c.validateAnonymize(add)
+
 	if len(problems) > 0 {
 		return &ValidationError{Problems: problems}
 	}

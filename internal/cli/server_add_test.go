@@ -140,7 +140,7 @@ func TestServerAddRegistersTheServerAndInstallsTheShim(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "hetzner-prod"}, inst, false)
+	err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "hetzner-prod"}, inst, false)
 	if err != nil {
 		t.Fatalf("runServerAdd() = %v, want success", err)
 	}
@@ -169,7 +169,7 @@ func TestServerAddSkipsTheUploadWhenTheShimIsCurrent(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
+	if err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
 		t.Fatalf("runServerAdd() = %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestServerAddWritesNothingWhenTheProbeFails(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
+	err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if err == nil {
 		t.Fatal("runServerAdd() = nil, want the failure to propagate")
 	}
@@ -207,7 +207,7 @@ func TestServerAddWithoutAConfigPointsAtInit(t *testing.T) {
 	inst, dialled := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
+	err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if err == nil {
 		t.Fatal("runServerAdd() = nil, want an error when there is no brama.yaml")
 	}
@@ -227,13 +227,13 @@ func TestServerAddRejectsADuplicateWithoutConnecting(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
+	if err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
 		t.Fatalf("first runServerAdd() = %v", err)
 	}
 
 	second := linuxServer()
 	inst2, dialled := installerFor(second)
-	err := runServerAdd(env, root, "prod", config.Server{Host: "other"}, inst2, false)
+	err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "other"}, inst2, false)
 	if err == nil {
 		t.Fatal("second runServerAdd() = nil, want it to reject a name already registered")
 	}
@@ -254,7 +254,7 @@ func TestServerAddFailsBeforeConnectingWhenNoShimIsEmbedded(t *testing.T) {
 	inst.embedded = func() bool { return false }
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
+	err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if !errors.Is(err, shim.ErrNotBuilt) {
 		t.Fatalf("err = %v, want ErrNotBuilt", err)
 	}
@@ -271,7 +271,7 @@ func TestServerAddReportsAPlatformWithNoBuild(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, _, _ := testEnv()
 
-	err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false)
+	err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false)
 	if err == nil {
 		t.Fatal("runServerAdd() = nil, want an error for an unsupported platform")
 	}
@@ -341,7 +341,7 @@ func TestServerAddDryRunReportsAPendingUpgradeAndWritesNothing(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, out, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, true); err != nil {
+	if err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, true); err != nil {
 		t.Fatalf("runServerAdd() = %v, want success", err)
 	}
 
@@ -369,7 +369,7 @@ func TestServerAddDryRunStillReachesTheServer(t *testing.T) {
 	inst, dialled := installerFor(remote)
 	env, _, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, true); err != nil {
+	if err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, true); err != nil {
 		t.Fatalf("runServerAdd() = %v", err)
 	}
 	if !*dialled {
@@ -389,7 +389,7 @@ func TestServerAddPrintsWhatTheUpgradeChanged(t *testing.T) {
 	inst, _ := installerFor(remote)
 	env, out, _ := testEnv()
 
-	if err := runServerAdd(env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
+	if err := runServerAdd(t.Context(), env, root, "prod", config.Server{Host: "h"}, inst, false); err != nil {
 		t.Fatalf("runServerAdd() = %v", err)
 	}
 

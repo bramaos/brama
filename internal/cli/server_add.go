@@ -162,13 +162,13 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 			"it — but sends nothing and writes nothing.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("finding the working directory: %w", err)
 			}
 			srv := config.Server{Host: host, User: user}
-			return runServerAdd(env, dir, args[0], srv, sshInstaller(version), dryRun)
+			return runServerAdd(cmd.Context(), env, dir, args[0], srv, sshInstaller(version), dryRun)
 		},
 	}
 
@@ -189,7 +189,7 @@ func newServerAddCmd(env *console, version string) *cobra.Command {
 // connection is opened, and the file is written only once the Server has answered.
 // A servers: entry therefore always means "reachable, and the shim runs here" —
 // which is the whole reason the probe exists.
-func runServerAdd(env *console, dir, name string, srv config.Server, inst installer, dryRun bool) error {
+func runServerAdd(ctx context.Context, env *console, dir, name string, srv config.Server, inst installer, dryRun bool) error {
 	if srv.Host == "" {
 		return errors.New("--host is required — the ssh target to register")
 	}
@@ -229,7 +229,7 @@ func runServerAdd(env *console, dir, name string, srv config.Server, inst instal
 	// Wired to the interrupt signals so a Ctrl-C still runs the deferred Close: the
 	// ssh master is backgrounded, and one left alive is an authenticated channel to
 	// production nobody is watching.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	remote, err := inst.dial(ctx, ssh.Target{Host: srv.Host, User: srv.User})

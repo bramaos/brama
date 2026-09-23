@@ -59,7 +59,7 @@ func (h *Human) Result(r Result) error {
 	fields := r.Fields()
 	width := 0
 	for _, f := range fields {
-		if len(f.Label) > width {
+		if !f.ContractOnly && len(f.Label) > width {
 			width = len(f.Label)
 		}
 	}
@@ -67,6 +67,12 @@ func (h *Human) Result(r Result) error {
 	out := &lineWriter{w: h.Out}
 	out.println()
 	for _, f := range fields {
+		// A contract-only field is the caller's, and the Notes say the same thing to
+		// the person in prose. Printing both is the same facts twice, in the form that
+		// reads worst.
+		if f.ContractOnly {
+			continue
+		}
 		label := labelStyle.Render(pad(f.Label, width))
 		out.printf("  %s  %s\n", label, humanValue(f))
 	}

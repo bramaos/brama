@@ -22,10 +22,13 @@ const module = "github.com/bramaos/brama"
 // See docs/product-description.md, "The rendering rule".
 func TestCoreDoesNotImportARenderer(t *testing.T) {
 	corePackages := []string{
+		"internal/anonymize",
 		"internal/config",
 		"internal/adapter",
 		"internal/adapter/wordpress",
 		"internal/scaffold",
+		"internal/generator",
+		"internal/preset",
 		"internal/refusal",
 		"internal/schema",
 		"internal/schema/catalog",

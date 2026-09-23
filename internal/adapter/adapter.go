@@ -28,6 +28,46 @@ type Detector interface {
 	Detect(root string) (Detection, bool)
 }
 
+// Prefixer is an Adapter that can say what the project's database tables are named
+// with, by reading the project's own config.
+//
+// It is separate from Detector because it answers a different question at a different
+// time: detection runs once, at `brama init`, and the prefix is read every time a Preset
+// is resolved, out of files that may have changed since. Nothing writes it into
+// brama.yaml — a prefix recorded there is a second copy of the truth, and the copy that
+// goes stale.
+type Prefixer interface {
+	Detector
+	// TablePrefix reports the prefix, or an error naming the files it read. declared is
+	// `app.paths.config`, the project's own config file as detection recorded it, and is
+	// empty where nothing recorded one.
+	//
+	// It never falls back to the framework's default: a Preset applied against the wrong
+	// prefix classifies whatever table sorted into place as the accounts table.
+	TablePrefix(root, declared string) (string, error)
+}
+
+// TablePrefix asks the named Adapter what the project under root prefixes its tables
+// with.
+//
+// The name is `app.adapter` rather than a fresh detection: the project already settled
+// which framework it is, and asking again here could answer differently from the file
+// brama is in the middle of reading.
+func TablePrefix(root, name, declared string, detectors []Detector) (string, error) {
+	for _, d := range detectors {
+		if d.Name() != name {
+			continue
+		}
+		prefixer, ok := d.(Prefixer)
+		if !ok {
+			return "", fmt.Errorf("the %s adapter cannot read a table prefix out of a project", name)
+		}
+		return prefixer.TablePrefix(root, declared)
+	}
+
+	return "", fmt.Errorf("unknown adapter %q — known adapters: %s", name, strings.Join(Names(detectors), ", "))
+}
+
 // Detection is what detection produced.
 type Detection struct {
 	Adapter string

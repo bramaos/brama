@@ -13,9 +13,31 @@ type Reason string
 
 const (
 	// Unclassified is a column, or a discriminator value, with no Classification.
-	// The only Reason v0.1 can produce; `upward` and `policy` arrive with the
-	// commands that can raise them.
+	// `upward` and `policy` arrive with the commands that can raise them.
 	Unclassified Reason = "unclassified"
+	// Invalid is a Classification the file states and brama cannot carry out — a
+	// Generator that does not exist, a `correlate` beside a `keep`, a correlation
+	// group with one member. Distinct from Unclassified: a decision was written
+	// down, and it is not one that can be acted on.
+	Invalid Reason = "invalid_classification"
+	// ReviewRequired is work left for a human: an unapproved `keep`, or a Preset
+	// loosening held back from applying itself. Nothing went wrong and nothing was
+	// skipped — `brama anonymize review` did the mechanical half and stopped at the
+	// half that is a decision. It exits 42 like every other Refusal, which is what
+	// makes a CI job fail on it without reading prose.
+	ReviewRequired Reason = "review_required"
+	// UnknownPrefix is a project whose table prefix brama could not read out of its own
+	// config, on a project whose Preset is written against one. Nothing is wrong with
+	// the classification — brama cannot tell which tables it is about, and a Preset
+	// applied under a guessed prefix would classify whatever table sorted into the
+	// accounts table's place. See ADR 0013 on resemblance-matching.
+	UnknownPrefix Reason = "unknown_prefix"
+	// NoFallback is a `keep` column the destination has not approved and no Generator
+	// claims, so there is nothing to send it as. Brama may reduce exposure by
+	// derivation — it may not invent destructive policy by emptying a column nobody
+	// asked it to empty — so it stops and names the column instead.
+	// See docs/adr/0010-classification-and-approval-are-separate-axes.md.
+	NoFallback Reason = "no_fallback"
 )
 
 // Refusal is a declined operation.

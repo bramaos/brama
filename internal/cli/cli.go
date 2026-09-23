@@ -16,6 +16,7 @@ import (
 	"charm.land/fang/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/bramaos/brama/internal/prompt"
 	"github.com/bramaos/brama/internal/refusal"
 	"github.com/bramaos/brama/internal/renderer"
 )
@@ -28,11 +29,28 @@ const (
 	ExitRefused = 42
 )
 
+// initVerb is the name of the two commands that bootstrap a file: `brama init` writes
+// brama.yaml, `brama anonymize init` writes the classification in it. They are the same
+// verb on purpose — each one starts something that is then reviewed and committed.
+const initVerb = "init"
+
 // ErrAlreadyReported marks an error whose outcome the command has already rendered.
 // Wrapping it sets the exit code without printing a second time — which matters most
 // for a partial result, where the fields are the useful output and a trailing error
 // line would contradict them.
 var ErrAlreadyReported = errors.New("already reported")
+
+// reported marks an outcome the command has already rendered, so Main sets the exit
+// code and prints nothing more.
+//
+// It is how a command whose run produced a Result *and* stopped short says both in one
+// payload: `anonymize review` applies the automatic half, reports it in the two lanes,
+// and still exits 42 because the other half is a decision it is not allowed to make.
+// Rendering the Refusal on top would repeat in prose what the Result just said, and
+// would put a second object in a machine contract that is one object per run.
+func reported(err error) error {
+	return fmt.Errorf("%w: %w", ErrAlreadyReported, err)
+}
 
 // console is what commands render through. It exists so a test can swap the renderer
 // and the streams without touching a global.
@@ -45,6 +63,13 @@ type console struct {
 	Out      io.Writer
 	Err      io.Writer
 	JSON     bool
+	// Ask puts a checklist to whoever is at the keyboard, and is nil where there is
+	// nobody: a CI runner, an agent, a pipe, or a run told `--non-interactive`.
+	//
+	// Nil is the ordinary case and never a failure. A command that can ask has to do the
+	// whole of its job without asking too, which is what makes the same command usable
+	// by a person and by a pipeline.
+	Ask asker
 }
 
 // writeSkeletonPreview prints a generated file for --dry-run. Human output only:
@@ -67,7 +92,7 @@ func (e *console) writeSkeletonPreview(body []byte) error {
 
 // Main runs brama and returns the process exit code.
 func Main(version string) int {
-	var jsonOut bool
+	var jsonOut, nonInteractive bool
 
 	root := &cobra.Command{
 		Use:   "brama",
@@ -82,15 +107,18 @@ func Main(version string) int {
 
 	root.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit the machine-readable result")
 
-	// No --non-interactive yet. Nothing in this release prompts, and a flag that
-	// silently does nothing is the "warning nobody reads" failure ADR-0003 names.
-	// It arrives with the first command that asks a question — `anonymize init`.
+	// --non-interactive is a person asking for the run an agent gets. It refuses to
+	// prompt rather than skipping a guardrail: every question brama asks has an answer
+	// it takes when nobody answers, and that answer is always the narrower one.
+	root.PersistentFlags().BoolVar(&nonInteractive, "non-interactive", false,
+		"never ask a question — take the answer a run with nobody at the keyboard takes")
 
 	env := &console{Out: os.Stdout, Err: os.Stderr}
 	// Flags are not parsed when the command tree is built, so the renderer is chosen
 	// once parsing is done and before any command runs.
 	root.PersistentPreRun = func(*cobra.Command, []string) {
 		env.JSON = jsonOut
+		env.Ask = interactive(jsonOut, nonInteractive)
 		if jsonOut {
 			env.Renderer = renderer.NewJSON(env.Out)
 			return
@@ -98,7 +126,12 @@ func Main(version string) int {
 		env.Renderer = renderer.NewHuman(env.Out, env.Err)
 	}
 
-	root.AddCommand(newInitCmd(env), newServerCmd(env, version), newVersionCmd(env, version))
+	root.AddCommand(
+		newInitCmd(env),
+		newAnonymizeCmd(env),
+		newServerCmd(env, version),
+		newVersionCmd(env, version),
+	)
 
 	err := fang.Execute(
 		context.Background(),
@@ -121,8 +154,12 @@ func Main(version string) int {
 		return ExitError
 	}
 
+	// A Refusal the command already reported still exits 42 — the code is the contract,
+	// and it is the same whether the news arrived as a Refusal or inside a Result.
 	if r, ok := refusal.As(err); ok {
-		_ = env.Renderer.Refused(commandPath(root), r)
+		if !errors.Is(err, ErrAlreadyReported) {
+			_ = env.Renderer.Refused(commandPath(root), r)
+		}
 		return ExitRefused
 	}
 	if errors.Is(err, ErrAlreadyReported) {
@@ -130,6 +167,20 @@ func Main(version string) int {
 	}
 	_ = env.Renderer.Error(commandPath(root), err)
 	return ExitError
+}
+
+// interactive is the asker for this run, and nil where the run has nobody to ask.
+//
+// --json is non-interactive by the same rule as the flag: the output is a contract one
+// object per run, and a checklist drawn into it would be a frame of ANSI escapes in the
+// middle of somebody's JSON.
+func interactive(jsonOut, nonInteractive bool) asker {
+	if jsonOut || nonInteractive || !prompt.Interactive(os.Stdin, os.Stdout) {
+		return nil
+	}
+	return func(title string, items []prompt.Item) ([]bool, error) {
+		return prompt.Ask(os.Stdin, os.Stdout, title, items)
+	}
 }
 
 // commandPath names the command that refused, for the JSON `action` field.

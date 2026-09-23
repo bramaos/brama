@@ -62,6 +62,13 @@ type Field struct {
 	// It is a rendering hint, not contract data: the JSON renderer never reads it,
 	// and an empty Value is still null there.
 	Absent string
+	// ContractOnly keeps a Field out of the human rendering and in the JSON.
+	//
+	// It is for the facts a caller has to act on item by item and a person reads better
+	// as prose — a list of columns is one wrapped line in a table and a paragraph in the
+	// Notes. Both audiences get the same facts; neither gets them twice. A Result using
+	// this owes the person a Note saying the same thing.
+	ContractOnly bool
 }
 
 // Renderer writes a Result, or a Refusal, for one audience.
@@ -88,4 +95,11 @@ func (f Fields) Add(key, label string, value any) Fields {
 // a person should be told when it is.
 func (f Fields) AddOptional(key, label string, value any, absent string) Fields {
 	return append(f, Field{Key: key, Label: label, Value: value, Absent: absent})
+}
+
+// AddContractOnly adds a field to the machine contract alone. It takes no label,
+// because nothing renders one: the person reading the terminal is told the same thing
+// in the Result's Notes, in prose.
+func (f Fields) AddContractOnly(key string, value any) Fields {
+	return append(f, Field{Key: key, Value: value, ContractOnly: true})
 }
