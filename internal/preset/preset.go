@@ -6,8 +6,9 @@
 // project without anyone editing anything.
 // See docs/adr/0011-the-stricter-of-preset-and-record-wins.md.
 //
-// A Preset names its tables after the project's own table prefix, which its Adapter reads
-// out of the project's config: `wp_` is what the WordPress installer writes and not what
+// A Preset names its tables, and the Discriminator keys that carry the prefix too, after
+// the project's own table prefix, which its Adapter reads out of the project's config:
+// `wp_` is what the WordPress installer writes and not what
 // `$table_prefix` means, and a Preset matched against the wrong prefix would classify
 // whatever table sorted into place. See Lookup, and
 // docs/adr/0014-a-preset-is-named-for-the-projects-table-prefix.md.
@@ -52,12 +53,15 @@ type Preset struct {
 // would be a closed set written down and then left unenforced.
 var presets = []Preset{wordpress}
 
-// prefixMark is what a Preset writes where the project's own table prefix goes.
+// prefixMark is what a Preset writes where the project's own table prefix goes, in a
+// table's name and in a Discriminator key alike.
 //
 // A Preset knows which tables a framework creates and what is in them; it does not know
 // what they are called, because the name is half the framework's and half the project's.
 // WordPress spells the project's half `$table_prefix`, and `wp_` is only its most common
-// value. See Lookup.
+// value. Some Discriminator values carry it too — `wp_capabilities` is `$table_prefix` +
+// `capabilities`, written into `usermeta` — and they are the project's name for the same
+// reason a table is. See Lookup.
 const prefixMark = "{prefix}"
 
 // Lookup returns the Preset shipped under this name, named for this project.
@@ -122,15 +126,25 @@ func shipped(name string) (Preset, bool) {
 }
 
 func (p Preset) needsPrefix() bool {
-	for name := range p.Tables {
+	for name, t := range p.Tables {
 		if strings.Contains(name, prefixMark) {
 			return true
+		}
+		for key := range t.Keys {
+			if strings.Contains(key, prefixMark) {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-// named resolves the prefixMark in every table name against this project's prefix.
+// named resolves the prefixMark in every table name and every Discriminator key against
+// this project's prefix.
+//
+// Only those two carry it. A column name is the framework's alone — WordPress names
+// `meta_key` the same on every install — so a `{prefix}` written among the columns is a
+// mistake in the Preset and is left to read as one.
 func (p Preset) named(prefix string) (Preset, error) {
 	if prefix == "" && p.needsPrefix() {
 		return Preset{}, fmt.Errorf("the %s preset is written against this project's table prefix, "+
@@ -139,9 +153,22 @@ func (p Preset) named(prefix string) (Preset, error) {
 
 	out := Preset{Name: p.Name, Tables: make(map[string]config.Table, len(p.Tables))}
 	for name, t := range clone(p.Tables) {
+		t.Keys = namedKeys(t.Keys, prefix)
 		out.Tables[strings.ReplaceAll(name, prefixMark, prefix)] = t
 	}
 	return out, nil
+}
+
+// namedKeys resolves the prefixMark in a table's Discriminator keys.
+func namedKeys(keys map[string]config.Column, prefix string) map[string]config.Column {
+	if keys == nil {
+		return nil
+	}
+	out := make(map[string]config.Column, len(keys))
+	for key, col := range keys {
+		out[strings.ReplaceAll(key, prefixMark, prefix)] = col
+	}
+	return out
 }
 
 // Names lists the Presets brama ships, sorted, for help text and error messages.

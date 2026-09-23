@@ -20,6 +20,11 @@ See `docs/agents/changelog.md` for how entries are written.
 - Approve a prefix entry as written: `wp_options.option_name=_transient_*`. An approval
   names the entry, not a key under it; `check` refuses `…=_transient_abc` and names the
   prefix to approve instead. (#67, #8)
+- Match the discriminator keys that carry `$table_prefix` against your project's own
+  prefix too. WordPress writes `$table_prefix` + `capabilities` into `usermeta`, so an
+  install on `acme_` holds `acme_capabilities`, and the preset classifies it there rather
+  than leaving it unclassified and refusing the pull. The prefix is still read out of the
+  project on every run and never written to `brama.yaml`. (#68, #8)
 - Match the `wordpress` preset against your project's own `$table_prefix`, so an install
   on `acme_` gets the preset an install on `wp_` always got. The prefix is read out of
   the project's own config — `wp-config.php`, or `.env` and `config/application.php` on

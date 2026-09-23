@@ -126,6 +126,29 @@ func TestLookupNamesTheTablesForThisProjectsPrefix(t *testing.T) {
 	}
 }
 
+// Some Discriminator values carry the prefix too: WordPress writes `$table_prefix` +
+// `capabilities` into usermeta, so `wp_capabilities` is one install's spelling of it. A
+// preset that wrote the `wp_` spelling would leave the key Unclassified everywhere else,
+// and an Unclassified key refuses the Pull.
+func TestLookupNamesTheDiscriminatorKeysThatCarryThePrefix(t *testing.T) {
+	p, err := preset.Lookup("wordpress", "acme_")
+	if err != nil {
+		t.Fatalf("Lookup(wordpress, acme_): %v", err)
+	}
+
+	keys := p.Tables["acme_usermeta"].Keys
+	if _, known := keys["acme_capabilities"]; !known {
+		t.Errorf("keys = %v, want the capabilities key named acme_capabilities", slices.Sorted(maps.Keys(keys)))
+	}
+	if _, stale := keys["wp_capabilities"]; stale {
+		t.Error("wp_capabilities survived a project whose prefix is acme_ — a key this database does not hold")
+	}
+	// The key that carries no prefix is the control: resolving must not prepend one.
+	if _, known := keys["first_name"]; !known {
+		t.Errorf("keys = %v, want first_name left as core writes it", slices.Sorted(maps.Keys(keys)))
+	}
+}
+
 // The placeholder is never a table name. A preset resolved without a prefix would
 // classify `{prefix}users`, which matches nothing and says nothing about why.
 func TestLookupRefusesAPresetItCannotName(t *testing.T) {

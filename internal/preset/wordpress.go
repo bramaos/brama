@@ -15,7 +15,8 @@ import (
 // Table names are written against the prefix rather than against `wp_`. `wp_` is only
 // the most common value of `$table_prefix` and not what it means — a hardened install is
 // on `acme_` — so the prefix is read out of the project's own config by the Adapter and
-// put in here. See Lookup.
+// put in here. The usermeta keys core builds the same way, `$table_prefix` +
+// `capabilities`, are written against it too. See Lookup.
 //
 // The prefix is the site's own. A multisite install carries a second, per-site prefix on
 // top of it, and those tables are the project's to classify: they are one site's copy of
@@ -71,9 +72,12 @@ var wordpress = Preset{
 				"admin_color", "comment_shortcuts", "default_password_nag",
 				"dismissed_wp_pointers", "locale", "primary_blog", "rich_editing",
 				"show_admin_bar_front", "show_welcome_panel",
-				"source_domain", "syntax_highlighting", "use_ssl", "wp_capabilities",
-				"wp_dashboard_quick_press_last_post_id", "wp_user-settings",
-				"wp_user-settings-time", "wp_user_level",
+				"source_domain", "syntax_highlighting", "use_ssl",
+				// The keys WordPress writes as `$table_prefix` + the name, so they are
+				// `acme_capabilities` on an install prefixed `acme_`. They carry the
+				// project's half of the name exactly as the table does.
+				"{prefix}capabilities", "{prefix}dashboard_quick_press_last_post_id",
+				"{prefix}user-settings", "{prefix}user-settings-time", "{prefix}user_level",
 			)),
 			Columns: keeps("umeta_id", "user_id"),
 		},
