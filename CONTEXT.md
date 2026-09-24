@@ -124,8 +124,9 @@ _Avoid_: default, downgrade, override, redaction
 The column whose value selects which Classification applies to a row, for tables that
 store many kinds of value in one column — `wp_usermeta.meta_key`. The column it selects
 *for* is named beside it as the table's `value` — `wp_usermeta.meta_value`. A
-Discriminator value is classified by its exact name, or by a prefix ending in `*` —
-`_transient_*` — with the longest match winning. The Discriminator itself is never
+Discriminator value is classified by its exact name, by a name holding a Number
+placeholder — `wp_{n}_capabilities` — or by a prefix ending in `*` — `_transient_*`. The
+three are tried in that order, and within each the longest match wins. The Discriminator itself is never
 classified: it names a kind of value, not a person, and travels as it is. A dropped
 Discriminator value travels as no row at all. A row with no Discriminator value, NULL or
 empty, has the empty one, `""`, and is classified like any other.
@@ -146,6 +147,16 @@ Adapter, every time a Preset is resolved, and is never recorded in `brama.yaml`.
 cannot determine is a Refusal: a Preset applied under a guessed prefix classifies whatever
 table sorted into the accounts table's place.
 _Avoid_: namespace, schema, table name
+
+**Number placeholder**:
+`{n}` inside a Discriminator value, standing for one run of digits the framework splices
+into a key it otherwise names in full — `wp_{n}_capabilities` is the capabilities of one
+site of a WordPress network. Unlike the table prefix it is never substituted, because
+Brama does not know what numbers exist and does not ask: it matches, against the values
+production already handed back. So a key it recognises is one that is there, never one
+Brama supposed. An entry holds at most one, may end in `*` as well, and names what the
+number is for nowhere — a number is all the matching knows.
+_Avoid_: wildcard, glob, blog id, tenant id
 
 **Preset drift**:
 A column the Preset and the recorded Classification disagree about, once upgrading Brama
