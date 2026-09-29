@@ -140,7 +140,7 @@ func TestEmbeddedBuildForThisMachineRuns(t *testing.T) {
 
 	// The same bound the operation has: a Shim that hangs on --version is as broken
 	// as one that will not start, and a test that hangs with it says less.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
