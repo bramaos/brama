@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -468,6 +469,145 @@ func TestTableMatchPrefersTheExactEntryThenTheLongestPrefix(t *testing.T) {
 			got, ok := table.Match(tt.value)
 			if got != tt.want || ok != tt.ok {
 				t.Errorf("Match(%q) = %q, %v; want %q, %v", tt.value, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+// `{n}` stands for one run of digits and nothing else, so a numbered entry answers for
+// every site's copy of a key and for no key nobody has examined. It is literal everywhere
+// but that one bounded segment, so it outranks every open-ended prefix, and the exact name
+// outranks it. See docs/adr/0018-a-discriminator-value-may-hold-a-number-placeholder.md.
+func TestTableMatchRanksANumberedEntryBetweenTheExactNameAndAPrefix(t *testing.T) {
+	table := config.Table{
+		Discriminator: "meta_key",
+		Value:         "meta_value",
+		Keys: map[string]config.Column{
+			"wp_capabilities":       {Action: config.Keep},
+			"wp_{n}_capabilities":   {Action: config.Keep},
+			"wp_7_capabilities":     {Action: config.Drop},
+			"wp_{n}_user-settings*": {Action: config.Keep},
+			"wp_{n}_user-settings":  {Action: config.Drop},
+			"wp_*":                  {Action: config.Drop},
+			"wp_{n}_*":              {Action: config.Drop},
+			"wp_{n}0_x":             {Action: config.Keep},
+			"order_{n}":             {Action: config.Keep},
+			"{n}":                   {Action: config.Keep},
+		},
+	}
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+		ok    bool
+	}{
+		{"one digit", "wp_2_capabilities", "wp_{n}_capabilities", true},
+		{"several digits", "wp_403_capabilities", "wp_{n}_capabilities", true},
+		{"the unnumbered key is its own entry", "wp_capabilities", "wp_capabilities", true},
+		{"an exact name over a numbered entry", "wp_7_capabilities", "wp_7_capabilities", true},
+		{"a numbered entry over a prefix", "wp_12_capabilities", "wp_{n}_capabilities", true},
+		{"no digits falls to the prefix", "wp__capabilities", "wp_*", true},
+		{"letters fall to the prefix", "wp_admin_capabilities", "wp_*", true},
+		{"digits and letters fall to the prefix", "wp_2a_capabilities", "wp_*", true},
+		{"a numbered prefix", "wp_2_user-settings-time", "wp_{n}_user-settings*", true},
+		{"a numbered name over a numbered prefix of the same length", "wp_2_user-settings", "wp_{n}_user-settings", true},
+		{"a numbered prefix over a plain one", "wp_2_capabilities_x", "wp_{n}_*", true},
+		{"a longer numbered entry over a shorter", "wp_3_user-settings-x", "wp_{n}_user-settings*", true},
+		{"a shorter numbered prefix", "wp_3_other", "wp_{n}_*", true},
+		{"digits the literal text starts with", "wp_10_x", "wp_{n}0_x", true},
+		{"a number at the end", "order_42", "order_{n}", true},
+		{"a number and nothing else", "2024", "{n}", true},
+		{"a number with a sign", "-1", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := table.Match(tt.value)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("Match(%q) = %q, %v; want %q, %v", tt.value, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+// Without a prefix to fall back on, a numbered entry that does not match leaves the value
+// Unclassified: `wp_admin_capabilities` is a key nobody has examined, and it refuses.
+func TestTableMatchLeavesAKeyWithoutANumberUnclassified(t *testing.T) {
+	table := config.Table{Keys: map[string]config.Column{"wp_{n}_capabilities": {Action: config.Keep}}}
+
+	for _, value := range []string{"wp_capabilities", "wp__capabilities", "wp_admin_capabilities", "wp_{n}_capabilities", "wp_2_capabilities_x"} {
+		if got, ok := table.Match(value); ok {
+			t.Errorf("Match(%q) = %q, true; want no entry", value, got)
+		}
+	}
+}
+
+// `{n}` is key syntax, like `*`, so a hand-written file may use it with no preset at all.
+func TestAnonymizeAcceptsANumberPlaceholderInAKey(t *testing.T) {
+	cfg := mustParse(t, valid+"anonymize:\n  tables:\n    wp_usermeta:\n      discriminator: meta_key\n      value: meta_value\n      keys:\n        wp_{n}_capabilities:\n          action: keep\n        wp_{n}_user-settings*:\n          action: keep\n")
+
+	table := cfg.Anonymize.Tables["wp_usermeta"]
+	if got, ok := table.Match("wp_2_capabilities"); got != "wp_{n}_capabilities" || !ok {
+		t.Errorf("Match(%q) = %q, %v; want %q, true", "wp_2_capabilities", got, ok, "wp_{n}_capabilities")
+	}
+}
+
+// A placeholder brama does not know, or a second `{n}`, is a broken file: exit 1, not a
+// Refusal. Braces that are not a placeholder — no name between them — are literal text.
+func TestAnonymizeValidatesPlaceholdersInKeys(t *testing.T) {
+	tests := []struct {
+		name    string
+		key     string
+		wantErr string
+	}{
+		{"two numbers", "wp_{n}_meta_{n}", "at most one {n}"},
+		{"an unknown placeholder", "wp_{site}_capabilities", "{site} is not a placeholder"},
+		{"the prefix placeholder", "{prefix}capabilities", "{prefix} is not a placeholder"},
+		{"an uppercase number", "wp_{N}_capabilities", "{N} is not a placeholder"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := "anonymize:\n  tables:\n    usermeta:\n      discriminator: meta_key\n      value: meta_value\n      keys:\n        \"" + tt.key + "\":\n          action: keep\n"
+
+			err := parseErr(t, valid+body)
+			var invalid *config.ValidationError
+			if !errors.As(err, &invalid) {
+				t.Fatalf("Parse(%q) = %v, want a *config.ValidationError", tt.key, err)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Parse(%q) = %q, want it to contain %q", tt.key, err, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), "usermeta.keys."+tt.key) {
+				t.Errorf("Parse(%q) = %q, want it to name the offending key", tt.key, err)
+			}
+		})
+	}
+}
+
+// A key may hold braces as text. Only `{` a name `}` reads as a placeholder.
+func TestAnonymizeLeavesLiteralBracesInKeys(t *testing.T) {
+	for _, key := range []string{"{}", `{"a":1}`, "a{ n }b", "{0}", "a{b", "c}d", "{n"} {
+		mustParse(t, valid+"anonymize:\n  tables:\n    usermeta:\n      discriminator: meta_key\n      value: meta_value\n      keys:\n        '"+key+"':\n          action: keep\n")
+	}
+}
+
+// Literal reports whether an entry spelled as the value names that value and nothing else.
+func TestLiteral(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"wp_capabilities", true},
+		{"{}", true},
+		{"_transient_*", false},
+		{"a*b", false},
+		{"wp_{n}_capabilities", false},
+		{"wp_{site}_x", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if got := config.Literal(tt.key); got != tt.want {
+				t.Errorf("Literal(%q) = %v, want %v", tt.key, got, tt.want)
 			}
 		})
 	}

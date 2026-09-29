@@ -1148,6 +1148,34 @@ func TestCheckPassesWhenEveryDiscriminatorValueIsClassified(t *testing.T) {
 	}
 }
 
+// A multisite network writes each site's copy of a prefixed usermeta key with the site's id
+// after the prefix. The preset's numbered entries answer for every site's copy, and a key
+// nobody has examined in the same table still refuses.
+func TestCheckCoversEverySiteOfAMultisiteUsermeta(t *testing.T) {
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	env, _, _ := testEnv()
+	multisite := map[string][]string{"wp_usermeta": {
+		"wp_capabilities", "wp_2_capabilities", "wp_403_user_level", "wp_2_user-settings-time",
+		"wp_12_dashboard_quick_press_last_post_id",
+	}}
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", withKeys("staging", wordpressUsermeta(), multisite)); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want every site's keys covered", err)
+	}
+
+	multisite["wp_usermeta"] = append(multisite["wp_usermeta"], "wp_admin_capabilities")
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", withKeys("staging", wordpressUsermeta(), multisite)))
+	if r.Reason != refusal.Unclassified {
+		t.Errorf("Reason = %q, want %q", r.Reason, refusal.Unclassified)
+	}
+	if want := "wp_usermeta.meta_key='wp_admin_capabilities' has no classification"; !strings.Contains(r.Detail, want) {
+		t.Errorf("Detail = %q, want it to say %q", r.Detail, want)
+	}
+	if strings.Contains(r.Detail, "wp_2_capabilities") {
+		t.Errorf("Detail = %q, want wp_2_capabilities left out — wp_{n}_capabilities matches it", r.Detail)
+	}
+}
+
 // With no environment in reach no key was read, and a key nothing classifies is still
 // unclassified. That is said, beside column coverage, and the status is partial.
 func TestCheckSaysKeyCoverageWentUnverified(t *testing.T) {

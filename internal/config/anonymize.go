@@ -129,8 +129,9 @@ type Anonymize struct {
 type Table struct {
 	Discriminator string `yaml:"discriminator,omitempty"`
 	Value         string `yaml:"value,omitempty"`
-	// Keys classifies Discriminator values, each entry by its exact name or by a prefix
-	// ending in `*` — `_transient_*`. Match says which entry answers for a value.
+	// Keys classifies Discriminator values, each entry by its exact name, by a name
+	// holding NumberMark — `wp_{n}_capabilities` — or by a prefix ending in `*` —
+	// `_transient_*`. Match says which entry answers for a value.
 	Keys    map[string]Column `yaml:"keys,omitempty"`
 	Columns map[string]Column `yaml:"columns,omitempty"`
 }
@@ -138,27 +139,87 @@ type Table struct {
 // Match returns the `keys` entry that classifies one Discriminator value, as written, and
 // whether any does.
 //
-// The entry naming the value exactly wins, and after it the longest prefix covering it,
-// so `_transient_doing_cron` can say something of its own under `_transient_*`. Without
-// prefixes every transient hash WordPress invents would be Unclassified and refuse the
-// next Pull. See docs/adr/0017-discriminator-values-are-read-from-production.md.
+// The entry naming the value exactly wins, so `_transient_doing_cron` can say something of
+// its own under `_transient_*`. After it comes the entry holding NumberMark that matches
+// with the most literal characters, and after that the longest prefix covering the value.
+// Without prefixes every transient hash WordPress invents would be Unclassified and refuse
+// the next Pull, and without NumberMark every site's copy of a key would. A numbered entry
+// is literal everywhere but one bounded run of digits, so it outranks every open-ended
+// prefix: ranked below, `wp_*` would shadow `wp_{n}_capabilities`. See
+// docs/adr/0017-discriminator-values-are-read-from-production.md and
+// docs/adr/0018-a-discriminator-value-may-hold-a-number-placeholder.md.
 //
 // Values are compared as bytes. A row with no value, NULL or empty, is the empty value,
 // and is matched like any other.
 func (t Table) Match(value string) (string, bool) {
-	if _, ok := t.Keys[value]; ok {
+	if _, ok := t.Keys[value]; ok && !strings.Contains(value, NumberMark) {
 		return value, true
+	}
+	if key, ok := t.matchNumbered(value); ok {
+		return key, true
 	}
 	// Two prefixes of one value that are the same length are the same prefix, so the
 	// longest is never a tie and map order cannot pick between entries.
 	best, longest := "", -1
 	for key := range t.Keys {
 		prefix, ok := pattern(key)
-		if ok && len(prefix) > longest && strings.HasPrefix(value, prefix) {
+		if ok && !strings.Contains(key, NumberMark) && len(prefix) > longest && strings.HasPrefix(value, prefix) {
 			best, longest = key, len(prefix)
 		}
 	}
 	return best, longest >= 0
+}
+
+// matchNumbered returns the entry holding NumberMark that matches value with the most
+// literal characters. Between two that match with as many, the one naming the rest of
+// the value in full beats the one ending in `*`, and after that the order of the keys
+// decides, so map order never does.
+func (t Table) matchNumbered(value string) (string, bool) {
+	best, longest, bestStar := "", -1, false
+	for key := range t.Keys {
+		before, after, ok := strings.Cut(key, NumberMark)
+		if !ok {
+			continue
+		}
+		after, star := pattern(after)
+		if !matchNumber(value, before, after, star) {
+			continue
+		}
+		n := len(before) + len(after)
+		if n != longest {
+			if n > longest {
+				best, longest, bestStar = key, n, star
+			}
+			continue
+		}
+		if bestStar != star {
+			if !star {
+				best, bestStar = key, star
+			}
+			continue
+		}
+		if key < best {
+			best = key
+		}
+	}
+	return best, longest >= 0
+}
+
+// matchNumber reports whether value is before, one run of digits, then after — or, when
+// star is set, anything starting with after. Every length of the run is tried, so a digit
+// that after begins with is not swallowed by the run: `wp_10_x` matches `wp_{n}0_x`.
+func matchNumber(value, before, after string, star bool) bool {
+	rest, ok := strings.CutPrefix(value, before)
+	if !ok {
+		return false
+	}
+	for i := 0; i < len(rest) && isDigit(rest[i]); i++ {
+		tail := rest[i+1:]
+		if tail == after || star && strings.HasPrefix(tail, after) {
+			return true
+		}
+	}
+	return false
 }
 
 // pattern reports whether a `keys` entry is a prefix — `_transient_*` — and the prefix it
@@ -166,6 +227,60 @@ func (t Table) Match(value string) (string, bool) {
 // and `anonymize check` refuses the entry.
 func pattern(key string) (string, bool) {
 	return strings.CutSuffix(key, "*")
+}
+
+// NumberMark is the number placeholder: in a `keys` entry it matches one run of one or
+// more digits, and is never substituted. `wp_{n}_capabilities` answers for
+// `wp_2_capabilities` and `wp_403_capabilities`, and not for `wp_admin_capabilities`.
+const NumberMark = "{n}"
+
+// placeholders returns every placeholder in a `keys` entry: a brace, a name, a brace. A
+// name starts with a letter and holds letters, digits and underscores; braces around
+// anything else — `{}`, `{"a":1}`, `{0}` — are literal text a key may hold.
+func placeholders(key string) []string {
+	var found []string
+	for {
+		i := strings.IndexByte(key, '{')
+		if i < 0 {
+			return found
+		}
+		key = key[i:]
+		j := strings.IndexByte(key, '}')
+		if j < 0 {
+			return found
+		}
+		if name := key[1:j]; placeholderName(name) {
+			found = append(found, key[:j+1])
+			key = key[j+1:]
+			continue
+		}
+		key = key[1:]
+	}
+}
+
+// placeholderName reports whether what stands between two braces names a placeholder:
+// a letter, then letters, digits and underscores.
+func placeholderName(name string) bool {
+	if name == "" || !isLetter(name[0]) {
+		return false
+	}
+	for i := range len(name) {
+		if c := name[i]; !isLetter(c) && !isDigit(c) && c != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func isLetter(c byte) bool { return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+// Literal reports whether a `keys` entry spelled as key would name key and nothing else:
+// it holds no `*` and no placeholder. A Discriminator value that fails this cannot be
+// written into the file as itself.
+func Literal(key string) bool {
+	return !strings.Contains(key, "*") && len(placeholders(key)) == 0
 }
 
 // EmptyKey is how the file spells the empty Discriminator value, in a `keys` entry's
@@ -412,11 +527,30 @@ func (c *Config) validateAnonymize(add func(string, ...any)) {
 		}
 
 		for _, key := range sortedKeys(table.Keys) {
+			validateKey(add, at+".keys."+SpellKey(key), key)
 			validateColumn(add, at+".keys."+SpellKey(key), table.Keys[key])
 		}
 		for _, column := range sortedKeys(table.Columns) {
 			validateColumn(add, at+".columns."+column, table.Columns[column])
 		}
+	}
+}
+
+// validateKey reports the placeholders a `keys` entry cannot hold. brama knows one,
+// NumberMark, and an entry holds it at most once: two runs of digits side by side have no
+// single way to split, and a key numbered twice is a decision nobody has made yet.
+func validateKey(add func(string, ...any), at, key string) {
+	numbers := 0
+	for _, p := range placeholders(key) {
+		if p != NumberMark {
+			add("%s: %s is not a placeholder brama knows — %s matches one run of digits, "+
+				"and the table prefix is written out in full", at, p, NumberMark)
+			continue
+		}
+		numbers++
+	}
+	if numbers > 1 {
+		add("%s holds %s %d times, and a key holds at most one %s", at, NumberMark, numbers, NumberMark)
 	}
 }
 

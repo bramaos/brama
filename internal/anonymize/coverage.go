@@ -2,7 +2,6 @@ package anonymize
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/generator"
@@ -64,10 +63,11 @@ type UncoveredKey struct {
 }
 
 // Nameable reports whether the file can name this key by itself. A `*` in a `keys` entry
-// makes it a prefix, or a file `check` refuses, so a key holding one would be written as a
-// classification of every key it prefixes, or not written at all. A person decides it in
+// makes it a prefix, or a file `check` refuses, and a `{…}` placeholder makes it a
+// pattern, or a file that does not load, so a key holding either would be written as a
+// classification of every key it matches, or not written at all. A person decides it in
 // the file.
-func (k UncoveredKey) Nameable() bool { return !strings.Contains(k.Value, "*") }
+func (k UncoveredKey) Nameable() bool { return config.Literal(k.Value) }
 
 // String is the key the way a Refusal names it: `wp_usermeta.meta_key='stripe_customer_id'`.
 // The empty value is spelled as the file spells its entry, `wp_usermeta.meta_key=""`, so
