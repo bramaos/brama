@@ -94,7 +94,7 @@ func (s *server) ran(substr string) bool {
 
 func load(t *testing.T, s *server) *state.State {
 	t.Helper()
-	loaded, err := state.Load(context.Background(), s, envPath)
+	loaded, err := state.Load(t.Context(), s, envPath)
 	if err != nil {
 		t.Fatalf("Load() = %v, want success", err)
 	}
@@ -103,7 +103,7 @@ func load(t *testing.T, s *server) *state.State {
 
 func save(t *testing.T, s *server, st *state.State) {
 	t.Helper()
-	if err := state.Save(context.Background(), s, envPath, st); err != nil {
+	if err := state.Save(t.Context(), s, envPath, st); err != nil {
 		t.Fatalf("Save() = %v, want success", err)
 	}
 }
@@ -245,7 +245,7 @@ func TestPathsAreQuoted(t *testing.T) {
 	s := newServer()
 	hostile := "/var/www/a b'; rm -rf /"
 
-	if _, err := state.Load(context.Background(), s, hostile); err != nil {
+	if _, err := state.Load(t.Context(), s, hostile); err != nil {
 		t.Fatalf("Load() = %v", err)
 	}
 	if s.ran("b'; rm -rf /") {
@@ -262,7 +262,7 @@ func TestLoadRefusesUnreadableState(t *testing.T) {
 	s := newServer()
 	s.files[envPath+"/"+state.Dir+"/"+state.Filename] = "{not json"
 
-	_, err := state.Load(context.Background(), s, envPath)
+	_, err := state.Load(t.Context(), s, envPath)
 	if err == nil {
 		t.Fatal("Load() = nil, want a parse failure")
 	}
@@ -277,7 +277,7 @@ func TestLoadRejectsANewerSchema(t *testing.T) {
 	s := newServer()
 	s.files[envPath+"/"+state.Dir+"/"+state.Filename] = `{"version": 99}`
 
-	_, err := state.Load(context.Background(), s, envPath)
+	_, err := state.Load(t.Context(), s, envPath)
 	if err == nil {
 		t.Fatal("Load() = nil, want a newer schema to be rejected")
 	}
@@ -290,7 +290,7 @@ func TestLoadPropagatesAConnectionFailure(t *testing.T) {
 	s := newServer()
 	s.runErr = errors.New("connection refused")
 
-	if _, err := state.Load(context.Background(), s, envPath); err == nil {
+	if _, err := state.Load(t.Context(), s, envPath); err == nil {
 		t.Fatal("Load() = nil, want the failure to propagate")
 	}
 }

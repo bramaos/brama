@@ -80,7 +80,7 @@ func source(p shim.Platform) ([]byte, error) {
 
 func ensure(t *testing.T, s *server, version string) shim.Step {
 	t.Helper()
-	step, err := shim.Ensure(context.Background(), s, version, source)
+	step, err := shim.Ensure(t.Context(), s, version, source)
 	if err != nil {
 		t.Fatalf("Ensure() = %v, want success", err)
 	}
@@ -89,7 +89,7 @@ func ensure(t *testing.T, s *server, version string) shim.Step {
 
 func plan(t *testing.T, s *server, version string) shim.Step {
 	t.Helper()
-	step, err := shim.Plan(context.Background(), s, version, source)
+	step, err := shim.Plan(t.Context(), s, version, source)
 	if err != nil {
 		t.Fatalf("Plan() = %v, want success", err)
 	}
@@ -206,7 +206,7 @@ func TestEnsureFailsWhenTheInstalledShimReportsSomethingElse(t *testing.T) {
 	s := newServer("0.1.0")
 	s.reports = "0.1.0" // the swap silently did not take
 
-	_, err := shim.Ensure(context.Background(), s, "0.2.0", source)
+	_, err := shim.Ensure(t.Context(), s, "0.2.0", source)
 	if err == nil {
 		t.Fatal("Ensure() = nil, want the mismatch reported")
 	}
@@ -219,7 +219,7 @@ func TestEnsureNamesAPlatformItHasNoBuildFor(t *testing.T) {
 	s := newServer("")
 	s.platform = "FreeBSD amd64"
 
-	step, err := shim.Ensure(context.Background(), s, "0.2.0", source)
+	step, err := shim.Ensure(t.Context(), s, "0.2.0", source)
 	if !errors.Is(err, shim.ErrUnsupportedPlatform) {
 		t.Fatalf("err = %v, want ErrUnsupportedPlatform", err)
 	}
@@ -263,7 +263,7 @@ func TestPlanFailsWhenThereIsNoBuildForTheServer(t *testing.T) {
 	s := newServer("0.1.0")
 	s.platform = "FreeBSD amd64"
 
-	if _, err := shim.Plan(context.Background(), s, "0.2.0", source); !errors.Is(err, shim.ErrUnsupportedPlatform) {
+	if _, err := shim.Plan(t.Context(), s, "0.2.0", source); !errors.Is(err, shim.ErrUnsupportedPlatform) {
 		t.Fatalf("err = %v, want ErrUnsupportedPlatform", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestEnsureReportsAnUnreachableServer(t *testing.T) {
 	s := newServer("0.1.0")
 	s.runErr = errors.New("connection refused")
 
-	if _, err := shim.Ensure(context.Background(), s, "0.2.0", source); err == nil {
+	if _, err := shim.Ensure(t.Context(), s, "0.2.0", source); err == nil {
 		t.Fatal("Ensure() = nil, want the connection failure to propagate")
 	}
 }
