@@ -362,3 +362,27 @@ func TestCoverIgnoresValuesOfAColumnThatIsNotTheDiscriminator(t *testing.T) {
 			coverage.Keys, uncoveredKeys(coverage))
 	}
 }
+
+// A key the file would read as a pattern cannot be written as itself: a `*` makes it a
+// prefix and a `{…}` placeholder makes it a match on every site's copy, or a broken file.
+func TestUncoveredKeyNameable(t *testing.T) {
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{"stripe_customer_id", true},
+		{"", true},
+		{`{"a":1}`, true},
+		{"odd*key", false},
+		{"wp_{n}_capabilities", false},
+		{"wp_{site}_x", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			k := anonymize.UncoveredKey{Table: "wp_usermeta", Discriminator: "meta_key", Value: tt.value}
+			if got := k.Nameable(); got != tt.want {
+				t.Errorf("UncoveredKey{Value: %q}.Nameable() = %v, want %v", tt.value, got, tt.want)
+			}
+		})
+	}
+}

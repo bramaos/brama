@@ -159,6 +159,35 @@ func TestLookupNamesTheDiscriminatorKeysThatCarryThePrefix(t *testing.T) {
 	}
 }
 
+// A multisite network writes each site's copy of a prefixed usermeta key with the site's
+// id after the prefix. Each key is named twice, unnumbered — the only form a single-site
+// install has — and numbered, the two classified alike, and `{n}` survives the prefix.
+func TestLookupNamesEverySiteOfTheKeysThatCarryThePrefix(t *testing.T) {
+	p, err := preset.Lookup("wordpress", "acme_")
+	if err != nil {
+		t.Fatalf("Lookup(wordpress, acme_): %v", err)
+	}
+
+	keys := p.Tables["acme_usermeta"].Keys
+	for _, name := range []string{
+		"capabilities", "user_level", "dashboard_quick_press_last_post_id", "user-settings", "user-settings-time",
+	} {
+		plain, ok := keys["acme_"+name]
+		if !ok {
+			t.Errorf("keys lack acme_%s", name)
+			continue
+		}
+		numbered, ok := keys["acme_{n}_"+name]
+		if !ok {
+			t.Errorf("keys lack acme_{n}_%s, want every site's copy named", name)
+			continue
+		}
+		if numbered != plain {
+			t.Errorf("acme_{n}_%s = %v, want %v as acme_%s is classified", name, numbered, plain, name)
+		}
+	}
+}
+
 // The placeholder is never a table name. A preset resolved without a prefix would
 // classify `{prefix}users`, which matches nothing and says nothing about why.
 func TestLookupRefusesAPresetItCannotName(t *testing.T) {

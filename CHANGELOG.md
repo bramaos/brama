@@ -11,6 +11,15 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Classify discriminator values with a number placeholder: `{n}` in a `keys` entry
+  matches one run of digits, so `wp_{n}_capabilities` covers `wp_2_capabilities` and
+  `wp_403_capabilities` but not `wp_admin_capabilities`. An exact key still wins, and a
+  `{n}` entry wins over any `*` prefix. It works in a hand-written `brama.yaml` and may end
+  in `*`. A key holding two `{n}`, or any other `{name}` such as `{prefix}`, makes the file
+  invalid, exit 1. (#72)
+- Cover every site's copy of the prefixed `usermeta` keys in the `wordpress` preset —
+  `wp_2_capabilities`, `wp_3_user_level` — so a multisite `wp_usermeta` no longer refuses
+  over them. (#72)
 - Classify discriminator values in `brama anonymize init` the way columns are classified.
   A key a generator claims by name, like `billing_email`, is written as
   `fake.<generator>`, and a key none claims is left out and unclassified. Only exact keys

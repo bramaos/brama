@@ -79,6 +79,12 @@ var wordpress = Preset{
 				// project's half of the name exactly as the table does.
 				"{prefix}capabilities", "{prefix}dashboard_quick_press_last_post_id",
 				"{prefix}user-settings", "{prefix}user-settings-time", "{prefix}user_level",
+				// A multisite network keeps one usermeta and writes each site's copy
+				// with the site's id after the prefix, `wp_2_capabilities`. The id is
+				// matched, never looked up: see
+				// docs/adr/0018-a-discriminator-value-may-hold-a-number-placeholder.md.
+				"{prefix}{n}_capabilities", "{prefix}{n}_dashboard_quick_press_last_post_id",
+				"{prefix}{n}_user-settings", "{prefix}{n}_user-settings-time", "{prefix}{n}_user_level",
 			)),
 			Columns: keeps("umeta_id", "user_id"),
 		},
