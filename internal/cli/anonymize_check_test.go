@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1174,6 +1175,205 @@ func TestCheckCoversEverySiteOfAMultisiteUsermeta(t *testing.T) {
 	if strings.Contains(r.Detail, "wp_2_capabilities") {
 		t.Errorf("Detail = %q, want wp_2_capabilities left out — wp_{n}_capabilities matches it", r.Detail)
 	}
+}
+
+// A multisite network is the twelve tables every install has, two more columns on
+// users, and six site-global tables with core's own keys in the two keyed ones. The
+// preset answers for all of it: nothing is Unclassified, and every generator it names
+// fits the column core declares, or the run would have refused.
+func TestCheckCoversAWholeMultisiteNetwork(t *testing.T) {
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+	s, keys := wordpressInstall(true)
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", withKeys("staging", s, keys)); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want the whole network covered\n%s", err, out.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload["tables"] != float64(18) {
+		t.Errorf("tables = %v, want the network's eighteen", payload["tables"])
+	}
+	if payload["unclassified_columns"] != float64(0) {
+		t.Errorf("unclassified_columns = %v, want none", payload["unclassified_columns"])
+	}
+	if want := float64(countKeys(keys)); payload["schema_keys"] != want {
+		t.Errorf("schema_keys = %v, want %v — every key of the network read and covered", payload["schema_keys"], want)
+	}
+}
+
+// A single-site install has none of the network's tables, and a preset table the
+// database lacks is not counted: the six the preset names for a network change nothing
+// about the twelve.
+func TestCheckCountsNoNetworkTableOnASingleSite(t *testing.T) {
+	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
+	s, keys := wordpressInstall(false)
+
+	if err := runAnonymizeCheck(t.Context(), env, root, "", withKeys("staging", s, keys)); err != nil {
+		t.Fatalf("runAnonymizeCheck() = %v, want a single site covered\n%s", err, out.String())
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if payload["tables"] != float64(12) {
+		t.Errorf("tables = %v, want the twelve a single site has", payload["tables"])
+	}
+	// What the preset classifies in those twelve: the count before the network's tables
+	// were named, and two more for the `spam` and `deleted` a network adds to users.
+	if payload["columns"] != float64(293) || payload["correlation_groups"] != float64(2) {
+		t.Errorf("columns, correlation_groups = %v, %v, want 293, 2", payload["columns"], payload["correlation_groups"])
+	}
+	if payload["unclassified_columns"] != float64(0) {
+		t.Errorf("unclassified_columns = %v, want none", payload["unclassified_columns"])
+	}
+	if want := float64(countColumns(s)); payload["schema_columns"] != want {
+		t.Errorf("schema_columns = %v, want %v", payload["schema_columns"], want)
+	}
+}
+
+func countKeys(keys map[string][]string) int {
+	n := 0
+	for _, values := range keys {
+		n += len(values)
+	}
+	return n
+}
+
+func countColumns(s schema.Schema) int {
+	n := 0
+	for _, t := range s.Tables {
+		n += len(t.Columns)
+	}
+	return n
+}
+
+// wordpressInstall is the Schema WordPress core creates under `wp_`, as
+// wp_get_db_schema() declares it, and the keys core itself writes into its keyed
+// tables. A network adds `spam` and `deleted` to users, the six site-global tables, and
+// a second site's copy of the prefixed usermeta keys.
+func wordpressInstall(multisite bool) (schema.Schema, map[string][]string) {
+	const prefix = "wp_"
+	id := func(name string) schema.Column {
+		return schema.Column{Name: name, Type: "bigint", Declared: "bigint(20) unsigned"}
+	}
+	varchar := func(name string, n int64) schema.Column {
+		return schema.Column{Name: name, Type: "varchar", Declared: fmt.Sprintf("varchar(%d)", n), Length: n}
+	}
+	typed := func(name, declared string) schema.Column {
+		typ, _, _ := strings.Cut(declared, "(")
+		return schema.Column{Name: name, Type: typ, Declared: declared}
+	}
+	meta := func(owner string) []schema.Column {
+		return []schema.Column{id("meta_id"), id(owner), varchar("meta_key", 255), typed("meta_value", "longtext")}
+	}
+	table := func(name string, cols ...schema.Column) schema.Table {
+		return schema.Table{Name: prefix + name, Columns: cols}
+	}
+
+	users := []schema.Column{
+		id("ID"), varchar("user_login", 60), varchar("user_pass", 255), varchar("user_nicename", 50),
+		varchar("user_email", 100), varchar("user_url", 100), typed("user_registered", "datetime"),
+		varchar("user_activation_key", 255), typed("user_status", "int(11)"), varchar("display_name", 250),
+	}
+	if multisite {
+		users = append(users, typed("spam", "tinyint(2)"), typed("deleted", "tinyint(2)"))
+	}
+
+	s := schema.Schema{Database: "acme", Tables: []schema.Table{
+		table("users", users...),
+		table("usermeta", id("umeta_id"), id("user_id"), varchar("meta_key", 255), typed("meta_value", "longtext")),
+		table("termmeta", meta("term_id")...),
+		table("terms", id("term_id"), varchar("name", 200), varchar("slug", 200), typed("term_group", "bigint(10)")),
+		table("term_taxonomy", id("term_taxonomy_id"), id("term_id"), varchar("taxonomy", 32),
+			typed("description", "longtext"), id("parent"), typed("count", "bigint(20)")),
+		table("term_relationships", id("object_id"), id("term_taxonomy_id"), typed("term_order", "int(11)")),
+		table("commentmeta", meta("comment_id")...),
+		table("comments", id("comment_ID"), id("comment_post_ID"), typed("comment_author", "tinytext"),
+			varchar("comment_author_email", 100), varchar("comment_author_url", 200),
+			varchar("comment_author_IP", 100), typed("comment_date", "datetime"),
+			typed("comment_date_gmt", "datetime"), typed("comment_content", "text"),
+			typed("comment_karma", "int(11)"), varchar("comment_approved", 20), varchar("comment_agent", 255),
+			varchar("comment_type", 20), id("comment_parent"), id("user_id")),
+		table("links", id("link_id"), varchar("link_url", 255), varchar("link_name", 255),
+			varchar("link_image", 255), varchar("link_target", 25), varchar("link_description", 255),
+			varchar("link_visible", 20), id("link_owner"), typed("link_rating", "int(11)"),
+			typed("link_updated", "datetime"), varchar("link_rel", 255), typed("link_notes", "mediumtext"),
+			varchar("link_rss", 255)),
+		table("options", id("option_id"), varchar("option_name", 191), typed("option_value", "longtext"),
+			varchar("autoload", 20)),
+		table("postmeta", meta("post_id")...),
+		table("posts", id("ID"), id("post_author"), typed("post_date", "datetime"),
+			typed("post_date_gmt", "datetime"), typed("post_content", "longtext"), typed("post_title", "text"),
+			typed("post_excerpt", "text"), varchar("post_status", 20), varchar("comment_status", 20),
+			varchar("ping_status", 20), varchar("post_password", 255), varchar("post_name", 200),
+			typed("to_ping", "text"), typed("pinged", "text"), typed("post_modified", "datetime"),
+			typed("post_modified_gmt", "datetime"), typed("post_content_filtered", "longtext"), id("post_parent"),
+			varchar("guid", 255), typed("menu_order", "int(11)"), varchar("post_type", 20),
+			varchar("post_mime_type", 100), typed("comment_count", "bigint(20)")),
+	}}
+	keys := map[string][]string{
+		prefix + "usermeta": {
+			"nickname", "first_name", "last_name", "description", "rich_editing", "syntax_highlighting",
+			"comment_shortcuts", "admin_color", "use_ssl", "show_admin_bar_front", "locale",
+			prefix + "capabilities", prefix + "user_level", "dismissed_wp_pointers", "session_tokens",
+		},
+		prefix + "options":  {"siteurl", "home", "blogname", "admin_email", "cron", prefix + "user_roles", "_transient_doing_cron"},
+		prefix + "postmeta": {"_edit_lock", "_edit_last", "_thumbnail_id", "_wp_attached_file"},
+	}
+	if !multisite {
+		return s, keys
+	}
+
+	s.Tables = append(s.Tables,
+		table("blogs", id("blog_id"), id("site_id"), varchar("domain", 200), varchar("path", 100),
+			typed("registered", "datetime"), typed("last_updated", "datetime"), typed("public", "tinyint(2)"),
+			typed("archived", "tinyint(2)"), typed("mature", "tinyint(2)"), typed("spam", "tinyint(2)"),
+			typed("deleted", "tinyint(2)"), typed("lang_id", "int(11)")),
+		table("blogmeta", meta("blog_id")...),
+		table("registration_log", id("ID"), varchar("email", 255), varchar("IP", 30), id("blog_id"),
+			typed("date_registered", "datetime")),
+		table("site", id("id"), varchar("domain", 200), varchar("path", 100)),
+		table("sitemeta", meta("site_id")...),
+		table("signups", id("signup_id"), varchar("domain", 200), varchar("path", 100), typed("title", "longtext"),
+			varchar("user_login", 60), varchar("user_email", 100), typed("registered", "datetime"),
+			typed("activated", "datetime"), typed("active", "tinyint(1)"), varchar("activation_key", 50),
+			typed("meta", "longtext")),
+	)
+	keys[prefix+"usermeta"] = append(keys[prefix+"usermeta"],
+		"primary_blog", "source_domain", prefix+"2_capabilities", prefix+"2_user_level",
+		prefix+"2_dashboard_quick_press_last_post_id",
+	)
+	keys[prefix+"blogmeta"] = []string{"db_version", "db_last_updated"}
+	keys[prefix+"sitemeta"] = []string{
+		// What populate_network_meta() writes for a new network.
+		"site_name", "admin_email", "admin_user_id", "registration", "upload_filetypes",
+		"blog_upload_space", "fileupload_maxk", "site_admins", "allowedthemes", "illegal_names",
+		"wpmu_upgrade_site", "welcome_email", "first_post", "siteurl", "add_new_users",
+		"upload_space_check_disabled", "subdomain_install", "ms_files_rewriting", "user_count",
+		"initial_db_version", "active_sitewide_plugins", "WPLANG",
+		// What the Network Settings screen saves.
+		"registrationnotification", "menu_items", "first_page", "first_comment",
+		"first_comment_url", "first_comment_author", "first_comment_email",
+		"welcome_user_email", "limited_email_domains", "banned_email_domains", "new_admin_email",
+		// What core writes later, as the network runs.
+		"blog_count", "main_site", "recently_activated", "can_compress_scripts",
+		"auto_update_plugins", "auto_update_themes", "auto_update_core_major",
+		"dismissed_update_core", "auto_core_update_failed", "auto_core_update_notified",
+		"global_terms_enabled", "site_meta_supported", "using_application_passwords",
+		"wp_force_deactivated_plugins", "network_admin_hash", "secret_key",
+		"auth_key", "auth_salt", "secure_auth_key", "secure_auth_salt", "logged_in_key",
+		"logged_in_salt", "nonce_key", "nonce_salt", "recovery_mode_auth_key",
+		"recovery_mode_auth_salt", "_site_transient_update_core", "_site_transient_timeout_theme_roots",
+	}
+	return s, keys
 }
 
 // With no environment in reach no key was read, and a key nothing classifies is still

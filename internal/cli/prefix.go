@@ -15,7 +15,7 @@ import (
 // Every command that resolves a Preset goes through here, so `init` and `check` cannot
 // end up disagreeing about which tables the Preset covers — which is the failure this
 // replaces: `init` writing `preset: wordpress` off `app.adapter` alone, and `check` then
-// counting twelve tables the database does not have.
+// counting tables the database does not have.
 //
 // named is the Preset waiting on the answer. It is almost always the Adapter's own name,
 // because a Preset is named after the Adapter whose tables it knows, and it is passed

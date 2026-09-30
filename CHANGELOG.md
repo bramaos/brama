@@ -11,6 +11,17 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Cover a multisite network's six site-global tables in the `wordpress` preset:
+  `wp_blogs`, `wp_site`, `wp_sitemeta`, `wp_blogmeta`, `wp_signups` and
+  `wp_registration_log`, named under your own table prefix, plus the `spam` and `deleted`
+  columns multisite adds to `wp_users`. A multisite install whose tables and keys are
+  core's own no longer refuses. The network's `admin_email` and each signup's and
+  registration's email are fabricated; salts, signup activation keys, signup `meta` and
+  registration IPs are dropped. (#74)
+- Drop `wp_sitemeta.meta_key=site_admins` in the `wordpress` preset, so a multisite copy has
+  **no super admin**: the list holds real logins that match no fabricated account. Each
+  site's administrators still work. Run `wp super-admin add <login>` on the copy for
+  network access. (#74)
 - Classify discriminator values with a number placeholder: `{n}` in a `keys` entry
   matches one run of digits, so `wp_{n}_capabilities` covers `wp_2_capabilities` and
   `wp_403_capabilities` but not `wp_admin_capabilities`. An exact key still wins, and a
@@ -275,6 +286,9 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Changed
 
+- Count two more classified columns in `wp_users` in `brama anonymize check` on a
+  single-site WordPress install: the `wordpress` preset now names multisite's `spam` and
+  `deleted`. With no schema in reach, the preset counts eighteen tables, not twelve. (#74)
 - **BREAKING:** the `wordpress` preset classifies `wp_postmeta` and `wp_options` per key
   instead of keeping `meta_value` and `option_value` whole. `meta_value` holds a thumbnail
   ID and a cached oEmbed response at once, and `option_value` the site title and the mail
