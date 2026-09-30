@@ -466,11 +466,11 @@ func TestReviewWithNobodyThereAsksNothing(t *testing.T) {
 // A checklist drawn into a JSON contract is a frame of escapes in the middle of somebody's
 // payload, and --non-interactive is a person asking for exactly that run.
 func TestInteractiveIsNilForAMachine(t *testing.T) {
-	if interactive(true, false) != nil {
-		t.Error("--json got an asker, want the machine contract left alone")
+	if ask, choose := interactive(true, false); ask != nil || choose != nil {
+		t.Error("--json got an asker or a chooser, want the machine contract left alone")
 	}
-	if interactive(false, true) != nil {
-		t.Error("--non-interactive got an asker, want no question asked")
+	if ask, choose := interactive(false, true); ask != nil || choose != nil {
+		t.Error("--non-interactive got an asker or a chooser, want no question asked")
 	}
 }
 

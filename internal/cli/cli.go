@@ -70,6 +70,8 @@ type console struct {
 	// whole of its job without asking too, which is what makes the same command usable
 	// by a person and by a pipeline.
 	Ask asker
+	// Choose asks for one answer out of a list, and is nil exactly where Ask is.
+	Choose chooser
 }
 
 // writeSkeletonPreview prints a generated file for --dry-run. Human output only:
@@ -118,7 +120,7 @@ func Main(version string) int {
 	// once parsing is done and before any command runs.
 	root.PersistentPreRun = func(*cobra.Command, []string) {
 		env.JSON = jsonOut
-		env.Ask = interactive(jsonOut, nonInteractive)
+		env.Ask, env.Choose = interactive(jsonOut, nonInteractive)
 		if jsonOut {
 			env.Renderer = renderer.NewJSON(env.Out)
 			return
@@ -169,18 +171,25 @@ func Main(version string) int {
 	return ExitError
 }
 
-// interactive is the asker for this run, and nil where the run has nobody to ask.
+// interactive is the asker and the chooser for this run, both nil where the run has
+// nobody to ask. They are decided together so that neither can be there without the
+// other: a run that may ask one kind of question and not the other has no single answer
+// to "is anybody at the keyboard?".
 //
 // --json is non-interactive by the same rule as the flag: the output is a contract one
 // object per run, and a checklist drawn into it would be a frame of ANSI escapes in the
 // middle of somebody's JSON.
-func interactive(jsonOut, nonInteractive bool) asker {
+func interactive(jsonOut, nonInteractive bool) (asker, chooser) {
 	if jsonOut || nonInteractive || !prompt.Interactive(os.Stdin, os.Stdout) {
-		return nil
+		return nil, nil
 	}
-	return func(title string, items []prompt.Item) ([]bool, error) {
+	ask := func(title string, items []prompt.Item) ([]bool, error) {
 		return prompt.Ask(os.Stdin, os.Stdout, title, items)
 	}
+	choose := func(title string, options []string) (int, error) {
+		return prompt.Choose(os.Stdin, os.Stdout, title, options)
+	}
+	return ask, choose
 }
 
 // commandPath names the command that refused, for the JSON `action` field.
