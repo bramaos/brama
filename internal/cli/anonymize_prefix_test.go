@@ -99,7 +99,7 @@ func TestCheckAsksForNoPrefixWhereNoPresetWantsOne(t *testing.T) {
 }
 
 // The headline is a count of what this project classifies, and a preset table the
-// database does not have is not one of them. Counting the preset's twelve tables on an
+// database does not have is not one of them. Counting every table the preset names on an
 // install that has one is the headline overstating itself — which is what it did on
 // every project whose prefix did not match.
 func TestCheckCountsOnlyThePresetTablesTheSchemaHas(t *testing.T) {
@@ -136,8 +136,9 @@ func TestCheckCountsTheWholePresetWithNoSchemaToNarrowIt(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
 		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
 	}
-	if payload["tables"] != float64(12) {
-		t.Errorf("tables = %v, want the preset's twelve where no schema could narrow them", payload["tables"])
+	// Twelve every install has, and six only a multisite network does.
+	if payload["tables"] != float64(18) {
+		t.Errorf("tables = %v, want the preset's eighteen where no schema could narrow them", payload["tables"])
 	}
 }
 

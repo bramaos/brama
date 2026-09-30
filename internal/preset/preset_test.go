@@ -188,6 +188,78 @@ func TestLookupNamesEverySiteOfTheKeysThatCarryThePrefix(t *testing.T) {
 	}
 }
 
+// A multisite network's site-global tables carry the plain prefix and no site id, one set
+// per install, so the preset names them under the project's prefix exactly as it names
+// users. Naming them on a single site that lacks them has no effect.
+func TestLookupNamesTheNetworkTablesForThisProjectsPrefix(t *testing.T) {
+	p, err := preset.Lookup("wordpress", "acme_")
+	if err != nil {
+		t.Fatalf("Lookup(wordpress, acme_): %v", err)
+	}
+
+	for _, name := range []string{"blogs", "site", "sitemeta", "blogmeta", "signups", "registration_log"} {
+		if _, known := p.Tables["acme_"+name]; !known {
+			t.Errorf("tables = %v, want the network table named acme_%s", slices.Sorted(maps.Keys(p.Tables)), name)
+		}
+		if _, stale := p.Tables["wp_"+name]; stale {
+			t.Errorf("wp_%s survived a project whose prefix is acme_", name)
+		}
+	}
+}
+
+// What a network holds that must not travel as it is: the address it mails from, the
+// list of super admins' real logins, a live signup activation token, and an IP no fake
+// fits in the column core declares for it.
+func TestTheWordPressPresetClassifiesTheNetworkTables(t *testing.T) {
+	p, err := preset.Lookup("wordpress", "acme_")
+	if err != nil {
+		t.Fatalf("Lookup(wordpress, acme_): %v", err)
+	}
+
+	sitemeta := p.Tables["acme_sitemeta"]
+	if sitemeta.Discriminator != "meta_key" || sitemeta.Value != "meta_value" {
+		t.Errorf("acme_sitemeta discriminator/value = %q/%q, want meta_key/meta_value",
+			sitemeta.Discriminator, sitemeta.Value)
+	}
+	for _, tt := range []struct {
+		at   string
+		got  config.Column
+		want config.Classification
+	}{
+		{"acme_sitemeta.meta_key=site_admins", sitemeta.Keys["site_admins"], config.Drop},
+		{"acme_sitemeta.meta_key=admin_email", sitemeta.Keys["admin_email"], "fake.email"},
+		{"acme_sitemeta.meta_key=secret_key", sitemeta.Keys["secret_key"], config.Drop},
+		{"acme_sitemeta.meta_key=logged_in_salt", sitemeta.Keys["logged_in_salt"], config.Drop},
+		{"acme_signups.activation_key", p.Tables["acme_signups"].Columns["activation_key"], config.Drop},
+		{"acme_signups.meta", p.Tables["acme_signups"].Columns["meta"], config.Drop},
+		{"acme_registration_log.IP", p.Tables["acme_registration_log"].Columns["IP"], config.Drop},
+		{"acme_site.domain", p.Tables["acme_site"].Columns["domain"], config.Keep},
+		{"acme_blogmeta.meta_key=db_version", p.Tables["acme_blogmeta"].Keys["db_version"], config.Keep},
+	} {
+		if tt.got.Action != tt.want {
+			t.Errorf("%s = %q, want %q", tt.at, tt.got.Action, tt.want)
+		}
+	}
+
+	// A signup that is activated becomes a users row, so its login and address are
+	// fabricated in the same identity as the account's.
+	signups := p.Tables["acme_signups"].Columns
+	users := p.Tables["acme_users"].Columns
+	if signups["user_login"] != users["user_login"] || signups["user_email"] != users["user_email"] {
+		t.Errorf("acme_signups login/email = %v/%v, want them correlated as acme_users' are (%v/%v)",
+			signups["user_login"], signups["user_email"], users["user_login"], users["user_email"])
+	}
+
+	// A site transient is a cache in sitemeta as it is in options, and a plugin's key is
+	// the project's to classify.
+	if key, ok := sitemeta.Match("_site_transient_timeout_theme_roots"); !ok || sitemeta.Keys[key].Action != config.Drop {
+		t.Errorf("acme_sitemeta Match(_site_transient_timeout_theme_roots) = %q, %v, want a drop", key, ok)
+	}
+	if key, ok := sitemeta.Match("acme_license_key"); ok {
+		t.Errorf("acme_sitemeta Match(acme_license_key) = %q, want a plugin's key left unclassified", key)
+	}
+}
+
 // The placeholder is never a table name. A preset resolved without a prefix would
 // classify `{prefix}users`, which matches nothing and says nothing about why.
 func TestLookupRefusesAPresetItCannotName(t *testing.T) {

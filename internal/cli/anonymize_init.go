@@ -180,7 +180,7 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	//
 	// Settled before a database is reached, like everything else here that a file can
 	// answer on its own. A Preset names its tables after the project's own prefix, so one
-	// resolved without it would cover twelve tables this database does not have — and
+	// resolved without it would cover tables this database does not have — and
 	// `check`, resolving the same file later, would count them. A prefix brama cannot
 	// read is a Refusal rather than a fallback to the framework's default, and refusing it
 	// here costs nobody a connection to production. The Preset the Adapter ships is the

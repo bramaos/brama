@@ -70,9 +70,9 @@ type Summary struct {
 // be asked to fix. See checkApprovals.
 //
 // present is the tables the Schema actually has, and nil where no Schema was in reach.
-// It narrows the Summary and nothing else: a Preset classifies the twelve tables its
-// framework creates, and counting the ones this database does not have would report
-// twelve tables classified on a project that has three. Problems are found against the
+// It narrows the Summary and nothing else: a Preset classifies every table its
+// framework can create, and counting the ones this database does not have would report
+// every one of them classified on a project that has three. Problems are found against the
 // whole file either way — a contradiction in a table nobody has is still a
 // contradiction, and it is one somebody wrote down.
 func Check(cfg *config.Config, environments []string, drift preset.Drifts, present []string) (Summary, []Problem) {

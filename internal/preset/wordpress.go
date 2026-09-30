@@ -8,9 +8,13 @@ import (
 
 // wordpress is the Classification brama ships for a WordPress install.
 //
-// It covers the twelve tables a default single-site WordPress creates, and nothing
-// else: a plugin's tables are the project's own to classify, and guessing at them from
-// a name is the inference a Preset exists to replace.
+// It covers the twelve tables a default single-site WordPress creates, the six
+// site-global tables a multisite network adds beside them, and nothing else: a plugin's
+// tables are the project's own to classify, and guessing at them from a name is the
+// inference a Preset exists to replace. The network's tables are named on every install,
+// because naming a table the database does not have has no effect: nothing reads it,
+// covers it or counts it. See
+// docs/adr/0019-the-wordpress-preset-names-the-networks-site-global-tables.md.
 //
 // Table names are written against the prefix rather than against `wp_`. `wp_` is only
 // the most common value of `$table_prefix` and not what it means — a hardened install is
@@ -22,7 +26,8 @@ import (
 // The prefix is the site's own. A multisite install carries a second, per-site prefix on
 // top of it, and those tables are the project's to classify: they are one site's copy of
 // tables this already answers for, and naming them from here would be guessing at how
-// many sites there are.
+// many sites there are. The network's own tables are not per site. They carry the plain
+// prefix, one set per install, and are named here like any other.
 //
 // Most of this is `keep`, and `keep` here is a statement about meaning and not a
 // permission: an Environment receives none of these as real values until a human
@@ -43,6 +48,11 @@ var wordpress = Preset{
 			"user_url":      fake("url"),
 			"display_name":  fake("full_name"),
 			"user_status":   keep,
+			// A multisite network adds these two: whether a super admin marked the
+			// account as spam, and whether it was deleted from the network. Account
+			// state, identifying nobody.
+			"spam":    keep,
+			"deleted": keep,
 			// When the registration happened identifies nobody on its own, and a site
 			// with every account registered at the same instant behaves strangely.
 			"user_registered": keep,
@@ -56,8 +66,8 @@ var wordpress = Preset{
 		// plugin writes is Unclassified until the project says what it holds, which is
 		// the refusal working rather than a gap.
 		"{prefix}usermeta": {
-			Discriminator: "meta_key",
-			Value:         "meta_value",
+			Discriminator: metaKey,
+			Value:         metaValue,
 			Keys: with(map[string]config.Column{
 				"first_name": fake("first_name"),
 				"last_name":  fake("last_name"),
@@ -126,8 +136,8 @@ var wordpress = Preset{
 		// the column is either a post library with no images or a cache of remote
 		// responses travelling whole.
 		"{prefix}postmeta": {
-			Discriminator: "meta_key",
-			Value:         "meta_value",
+			Discriminator: metaKey,
+			Value:         metaValue,
 			Keys: with(map[string]config.Column{
 				// The provider's HTML for an embedded URL, under a hash of that URL,
 				// with `_oembed_time_<hash>` beside it. A remote response cached on the
@@ -281,6 +291,112 @@ var wordpress = Preset{
 		"{prefix}termmeta":           columns(keeps("meta_id", "term_id", "meta_key", "meta_value")),
 		"{prefix}term_taxonomy":      columns(keeps("term_taxonomy_id", "term_id", "taxonomy", "description", "parent", "count")),
 		"{prefix}term_relationships": columns(keeps("object_id", "term_taxonomy_id", "term_order")),
+
+		// A multisite network's site-global tables, from here to the end. Core creates
+		// them with the plain prefix and no site id, one set per install; on a single
+		// site they are absent, and naming them changes nothing.
+		//
+		// The network and its sites. `domain` and `path` are a site's address, not a
+		// person's, for the reason `siteurl` is kept in options.
+		"{prefix}site": columns(keeps("id", "domain", "path")),
+		"{prefix}blogs": columns(keeps(
+			"blog_id", "site_id", "domain", "path", "registered", "last_updated", "public",
+			"archived", "mature", "spam", "deleted", "lang_id",
+		)),
+		// Per-site meta the network keeps. Core writes only the schema version and when
+		// it last upgraded a site.
+		"{prefix}blogmeta": {
+			Discriminator: metaKey,
+			Value:         metaValue,
+			Keys:          keeps("db_version", "db_last_updated"),
+			Columns:       keeps("meta_id", "blog_id"),
+		},
+		// The network's options, and the fourth key/value table. The list is core's
+		// own keys: what populate_network_meta() writes for a new network, what the
+		// Network Settings screen saves, and what core adds as the network runs. A
+		// plugin's key is Unclassified, as it is in options.
+		"{prefix}sitemeta": {
+			Discriminator: metaKey,
+			Value:         metaValue,
+			Keys: with(map[string]config.Column{
+				// The address the network mails from, and the one a pending change is
+				// waiting on, as in options.
+				"admin_email":     fake("email"),
+				"new_admin_email": fake("email"),
+				// The pending change itself: the new address, and the token that
+				// confirms it.
+				"network_admin_hash": drop,
+				// The commenter core writes into the first comment of every new site,
+				// classified as the comments table's own author block is: whoever runs
+				// the network may have typed in a real person.
+				"first_comment_author": fake("full_name"),
+				"first_comment_email":  fake("email"),
+				"first_comment_url":    fake("url"),
+				// The super admins, as a serialized list of real `user_login` values.
+				// Logins are fabricated, so the real list would match no account on
+				// the copy anyway, and leaking it buys nothing. Without the row
+				// WordPress falls back to its default, `admin`, so the copy has no
+				// super admin: each site's administrators still work, because the
+				// per-site capabilities are kept, and a developer restores network
+				// access with `wp super-admin add <login>`.
+				"site_admins": drop,
+				// The salts wp_salt() saves when wp-config.php defines none, and the
+				// recovery-mode cookie's. Whoever holds them forges a login cookie, and
+				// WordPress regenerates each one it finds missing. Named one by one: a
+				// `*_key` entry would sweep up a plugin's keys as core's.
+				"secret_key":              drop,
+				"auth_key":                drop,
+				"auth_salt":               drop,
+				"secure_auth_key":         drop,
+				"secure_auth_salt":        drop,
+				"logged_in_key":           drop,
+				"logged_in_salt":          drop,
+				"nonce_key":               drop,
+				"nonce_salt":              drop,
+				"recovery_mode_auth_key":  drop,
+				"recovery_mode_auth_salt": drop,
+				// The record of the last core update email: its type, version and the
+				// address it went to. Without it the updater at most mails again, to
+				// the fabricated admin_email.
+				"auto_core_update_notified": drop,
+				// Caches, as in options. `_site_transient_timeout_*` is covered too.
+				"_site_transient_*": drop,
+			}, keeps(
+				"WPLANG", "active_sitewide_plugins", "add_new_users", "admin_user_id",
+				"allowedthemes", "auto_core_update_failed", "auto_update_core_major",
+				"auto_update_plugins", "auto_update_themes", "banned_email_domains",
+				"blog_count", "blog_upload_space", "can_compress_scripts",
+				"dismissed_update_core", "fileupload_maxk", "global_terms_enabled",
+				"illegal_names", "initial_db_version", "limited_email_domains", "main_site",
+				"menu_items", "ms_files_rewriting", "recently_activated", "registration",
+				"registrationnotification", "site_meta_supported", "site_name", "siteurl",
+				"subdomain_install", "upload_filetypes", "upload_space_check_disabled",
+				"user_count", "using_application_passwords", "wp_force_deactivated_plugins",
+				"wpmu_upgrade_site",
+				// Templates the network writes into every new site and its welcome
+				// mails: site content, like a post.
+				"first_comment", "first_page", "first_post", "welcome_email", "welcome_user_email",
+			)),
+			Columns: keeps("meta_id", "site_id"),
+		},
+		// Registrations waiting on, or past, activation. An activated signup becomes a
+		// users row, so its login and address share that row's identity.
+		"{prefix}signups": columns(with(map[string]config.Column{
+			"user_login": correlated("username", "wp_user"),
+			"user_email": correlated("email", "wp_email"),
+			// A live activation token. Whoever holds it activates the account.
+			"activation_key": drop,
+			// A serialized array plugins extend with the registrant's own data:
+			// BuddyPress keeps profile fields here.
+			"meta": drop,
+		}, keeps("signup_id", "domain", "path", "title", "registered", "activated", "active"))),
+		// Who registered which site, and from where.
+		"{prefix}registration_log": columns(with(map[string]config.Column{
+			"email": correlated("email", "wp_email"),
+			// Core declares this `varchar(30)`, and `fake.ip` needs 45 characters, so
+			// no fabricated address fits. A registration IP is worth nothing on a copy.
+			"IP": drop,
+		}, keeps("ID", "blog_id", "date_registered"))),
 	},
 }
 
@@ -292,6 +408,13 @@ var wordpress = Preset{
 var (
 	keep = config.Column{Action: config.Keep}
 	drop = config.Column{Action: config.Drop}
+)
+
+// The Discriminator and value of every meta table this classifies per key: usermeta,
+// postmeta, blogmeta and sitemeta.
+const (
+	metaKey   = "meta_key"
+	metaValue = "meta_value"
 )
 
 func fake(generator string) config.Column {
