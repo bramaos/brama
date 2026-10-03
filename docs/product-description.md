@@ -445,8 +445,9 @@ sends nothing and writes nothing, in `brama.yaml` or on the Server.
 
 ### `--dry-run`
 
-Every acting command whose effect is local supports it. It resolves everything and executes
-nothing:
+Every command that changes state supports it, whether its effect is local or on a Server
+(ADR-0020). It resolves everything and executes nothing. It never asks, and it exits as the
+real run would:
 
 ```
 Environment:       production
@@ -459,8 +460,7 @@ Unclassified:      0
 Columns faked:     41
 URL rewrite:       https://www.example.com -> https://example.local.test
 Local recovery:    will dump 214 MB before import
-
-Continue? [y/N]
+Dry run:           yes
 ```
 
 ### Server requirements

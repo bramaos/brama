@@ -11,3 +11,4 @@ A rule with no citation is uncited on purpose: its reason is the code it describ
 - Let `--non-interactive` and `--json` stop prompts, never guardrails; add no `--yes` or `--force` that skips a check. (PD §10, ADR-0005)
 - Ask only through `env.Ask`, and treat a nil `Ask` as the normal case: take the narrower answer and finish. (`console.Ask` doc)
 - Add no destructive remote operation to v0.1; deployment waits for the data half to ship. (ADR-0004)
+- Give every command that changes state, local or on a Server, a `--dry-run` that changes nothing, never asks, reports `dry_run` and exits as the real run would; test that it left every file unchanged. (ADR-0020)
