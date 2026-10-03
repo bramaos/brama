@@ -49,13 +49,12 @@ func TestCheckMatchesThePresetAgainstTheProjectsOwnPrefix(t *testing.T) {
 func TestCheckDoesNotMatchThePresetAgainstTheDefaultPrefix(t *testing.T) {
 	root := classifiedProject(t, "anonymize:\n  preset: wordpress\n")
 	wpConfig(t, root, "acme_")
-	env, out, _ := testEnv()
+	env, _, _ := testEnv()
 
-	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", coreTables("wp_"))); err != nil {
-		t.Fatalf("runAnonymizeCheck() = %v", err)
-	}
-	if !strings.Contains(out.String(), "unclassified") {
-		t.Errorf("wp_users was classified on a project whose prefix is acme_:\n%s", out.String())
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", coreTables("wp_"))))
+
+	if r.Reason != refusal.Unclassified || !strings.Contains(r.Detail, "wp_users.") {
+		t.Errorf("refusal = %s: %q, want wp_users unclassified on a project whose prefix is acme_", r.Reason, r.Detail)
 	}
 }
 

@@ -53,40 +53,9 @@ type AnonymizeCheckResult struct {
 
 func (r *AnonymizeCheckResult) Action() string { return "anonymize_check" }
 
-// coverageState is how much of the column-coverage question one run settled.
-//
-// It is derived once and rendered four ways. The status, the headline, the notes and
-// the fields are four accounts of the same run, and deriving the answer separately in
-// each is how a headline ends up saying something the status denies.
-type coverageState int
-
-const (
-	// coverageUnread is a run that reached no Environment and read no Schema.
-	coverageUnread coverageState = iota
-	// coverageIncomplete compared the two and found columns nothing classifies.
-	coverageIncomplete
-	// coverageComplete compared the two and every column is answered for.
-	coverageComplete
-)
-
-// verified reports whether the comparison was a whole answer. Only then does a count
-// of unclassified columns mean anything.
-func (s coverageState) verified() bool {
-	return s == coverageIncomplete || s == coverageComplete
-}
-
-func (r *AnonymizeCheckResult) coverage() coverageState {
-	switch {
-	case r.Coverage == nil:
-		return coverageUnread
-	case r.Coverage.Complete():
-		return coverageComplete
-	default:
-		return coverageIncomplete
-	}
-}
-
 // Status separates a check that verified column coverage from one that could not.
+// A run that read a Schema and found anything Unclassified refused before it had a
+// Result, so a Coverage here is always a complete one.
 //
 // A run with no Schema did what it could, and what it could do is less than the whole
 // job: the columns a database has and the file does not are still Unclassified and a
@@ -100,7 +69,7 @@ func (r *AnonymizeCheckResult) coverage() coverageState {
 // and a pull to that destination still refuses until someone decides. A substitution is
 // not, because nothing is left over from one — it is the model working.
 func (r *AnonymizeCheckResult) Status() renderer.Status {
-	if r.coverage() == coverageComplete && len(r.Drift) == 0 && len(r.Fallbacks.NoFallback()) == 0 {
+	if r.Coverage != nil && len(r.Drift) == 0 && len(r.Fallbacks.NoFallback()) == 0 {
 		return renderer.StatusSuccess
 	}
 	return renderer.StatusPartial
@@ -113,22 +82,16 @@ func (r *AnonymizeCheckResult) Headline() string {
 		classifies += fmt.Sprintf(" with the %s preset", r.Preset)
 	}
 
-	switch r.coverage() {
-	case coverageComplete:
-		every := "every column"
-		if r.Coverage.Keys > 0 {
-			every = "every column and key"
-		}
-		return fmt.Sprintf("%s is consistent — %s, covering %s %s has",
-			filepath.Base(r.Path), classifies, every, r.SchemaFrom)
-	case coverageIncomplete:
-		return fmt.Sprintf("%s holds together, but %s of %s %s unclassified",
-			filepath.Base(r.Path), plural(len(r.Coverage.Unclassified), "column"), r.SchemaFrom,
-			isAre(len(r.Coverage.Unclassified)))
-	default:
+	if r.Coverage == nil {
 		return fmt.Sprintf("%s holds together — %s, against no schema",
 			filepath.Base(r.Path), classifies)
 	}
+	every := "every column"
+	if r.Coverage.Keys > 0 {
+		every = "every column and key"
+	}
+	return fmt.Sprintf("%s is consistent — %s, covering %s %s has",
+		filepath.Base(r.Path), classifies, every, r.SchemaFrom)
 }
 
 // Notes says what this run could not settle, and names what it found that the file
@@ -176,7 +139,7 @@ func fallbackNames(fallbacks anonymize.Fallbacks) []string {
 }
 
 // uncoveredNames is one line a column — its name and the type the Schema declares for
-// it, indented under whatever sentence introduced them. Three commands report the same
+// it, indented under whatever sentence introduced them. Two commands report the same
 // list of columns nothing classifies, and they say it the same way.
 func uncoveredNames(uncovered []anonymize.Uncovered) []string {
 	out := make([]string, 0, len(uncovered))
@@ -273,25 +236,19 @@ func theFilesAnswer(n int) string {
 	return "the file's answers"
 }
 
+// coverageNotes says what a run that read no Schema could not verify. Where one was
+// read there is nothing to say: anything Unclassified refused before a Result existed.
 func (r *AnonymizeCheckResult) coverageNotes() []string {
-	switch r.coverage() {
-	case coverageUnread:
-		notes := []string{"column coverage was not verified — this run read no schema, " +
-			"and a column the database has and this file does not is still unclassified"}
-		if r.Keyed {
-			notes = append(notes, "key coverage was not verified — this run read no keys, and a key "+
-				"the data holds and no keys entry matches is still unclassified")
-		}
-		return notes
-	case coverageIncomplete:
-		return append(
-			[]string{fmt.Sprintf("unclassified in %s — a pull refuses until each one is decided:", r.SchemaFrom)},
-			uncoveredNames(r.Coverage.Unclassified)...)
-	case coverageComplete:
-		// The schema was read and the file answers for all of it. The one run with
-		// nothing left to say.
+	if r.Coverage != nil {
+		return nil
 	}
-	return nil
+	notes := []string{"column coverage was not verified — this run read no schema, " +
+		"and a column the database has and this file does not is still unclassified"}
+	if r.Keyed {
+		notes = append(notes, "key coverage was not verified — this run read no keys, and a key "+
+			"the data holds and no keys entry matches is still unclassified")
+	}
+	return notes
 }
 
 func (r *AnonymizeCheckResult) Fields() []renderer.Field {
@@ -324,15 +281,14 @@ func (r *AnonymizeCheckResult) Fields() []renderer.Field {
 	// the comparison was not a whole answer these are zero because nothing was
 	// counted, not because nothing was found.
 	//
-	// No count of unclassified keys: a run that found one refused, so on every run that
-	// gets this far it would be zero.
-	var columns, unclassified, keys int
-	if r.coverage().verified() {
-		columns, unclassified, keys = r.Coverage.Columns, len(r.Coverage.Unclassified), r.Coverage.Keys
+	// No count of unclassified columns or keys: a run that found one refused, so on
+	// every run that gets this far it would be zero.
+	var columns, keys int
+	if r.Coverage != nil {
+		columns, keys = r.Coverage.Columns, r.Coverage.Keys
 	}
 	return fields.
 		Add("schema_columns", "Columns in the schema", columns).
-		Add("unclassified_columns", "Unclassified", unclassified).
 		Add("schema_keys", "Keys in the schema", keys)
 }
 
@@ -386,8 +342,8 @@ func newAnonymizeCheckCmd(env *console) *cobra.Command {
 			"keys the discriminator holds, byte for byte, and names every one no keys entry\n" +
 			"matches. Where none is, it says column and key coverage went unverified rather\n" +
 			"than reporting a clean bill of health it could not earn.\n\n" +
-			"Exits 42 when the file is inconsistent or a key is unclassified — nothing went\n" +
-			"wrong, a guardrail held.",
+			"Exits 42 when the file is inconsistent or a column or key is unclassified —\n" +
+			"nothing went wrong, a guardrail held.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -440,12 +396,12 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 	if len(read.Problems) > 0 {
 		return refusal.New(refusal.Invalid, problemDetail(read.Problems), "")
 	}
-	// An Unclassified key refuses, as anything Unclassified does (ADR 0003). `init` and
-	// `review` classify the keys a Generator claims by name; which of the rest a prefix
-	// should cover is a decision about every key a plugin will ever write, and a person
-	// makes it in the file.
-	if read.Coverage != nil && len(read.Coverage.UnclassifiedKeys) > 0 {
-		return refusal.New(refusal.Unclassified, keysDetail(read.Coverage.UnclassifiedKeys), "")
+	// Anything Unclassified refuses, column or key (ADR 0003). `init` and `review`
+	// classify what a Generator claims by name; which of the rest a key prefix should
+	// cover, or what a column nobody looked at holds, is a decision a person makes in
+	// the file.
+	if read.Coverage != nil && !read.Coverage.Complete() {
+		return refusal.New(refusal.Unclassified, unclassifiedDetail(*read.Coverage), "")
 	}
 
 	// What each destination would receive, which is Classification and Approval read
@@ -465,9 +421,6 @@ func runAnonymizeCheck(ctx context.Context, env *console, dir, only string, sour
 		Keyed:        len(read.Discriminators) > 0,
 	}
 
-	// Unclassified columns are reported, not refused. Whether `check` stops on them is
-	// its own decision, made once for the command rather than twice for the two ways
-	// of finding them — see #10.
 	if err := env.Renderer.Result(result); err != nil {
 		return fmt.Errorf("rendering the check result: %w", err)
 	}
@@ -603,19 +556,24 @@ func discriminators(a *config.Anonymize) map[string]string {
 	return out
 }
 
-// keysDetail is the Refusal's detail for Unclassified keys — one sentence for one, a
-// block for several. Every key is listed, however many there are: grouping them under a
-// guessed prefix is a decision, and cutting the list short sends somebody back for the
-// rest one CI run at a time.
-func keysDetail(keys []anonymize.UncoveredKey) string {
-	lines := make([]string, 0, len(keys))
-	for _, k := range keys {
+// unclassifiedDetail is the Refusal's detail for what a Coverage left Unclassified,
+// columns and then keys, in one list so that one run names every offender. One is a
+// sentence, several a block. Every one is listed, however many there are: grouping keys
+// under a guessed prefix is a decision, and cutting the list short sends somebody back
+// for the rest one CI run at a time.
+func unclassifiedDetail(c anonymize.Coverage) string {
+	lines := make([]string, 0, len(c.Unclassified)+len(c.UnclassifiedKeys))
+	for _, u := range c.Unclassified {
+		lines = append(lines, u.String()+" has no classification")
+	}
+	for _, k := range c.UnclassifiedKeys {
 		lines = append(lines, k.String()+" has no classification")
 	}
 	if len(lines) == 1 {
 		return lines[0]
 	}
-	return fmt.Sprintf("%d keys have no classification:\n  - %s", len(lines), strings.Join(lines, "\n  - "))
+	return fmt.Sprintf("%s have no classification:\n  - %s",
+		entries(len(c.Unclassified), len(c.UnclassifiedKeys)), strings.Join(lines, "\n  - "))
 }
 
 // environmentsFor is every Environment, or the one --env named. Both anonymize

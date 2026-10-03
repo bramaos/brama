@@ -426,16 +426,25 @@ func TestAnonymizeInitRejectsAnEnvironmentThatDoesNotExist(t *testing.T) {
 	}
 }
 
-// The written file is what `anonymize check` reads, and a block init wrote must not be
-// one check refuses.
-func TestAnonymizeInitWritesAFileCheckAccepts(t *testing.T) {
+// The written file is what `anonymize check` reads. A block init wrote holds together,
+// so the only thing check refuses it for is the columns init left for a person.
+func TestAnonymizeInitWritesAFileCheckRefusesOnlyForWhatItLeft(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, _, _ := testEnv()
 
 	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
-	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeCheck() after init = %v, want the written file to hold together", err)
+	err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", wordpressish()))
+	r, ok := refusal.As(err)
+	if !ok {
+		t.Fatalf("runAnonymizeCheck() after init = %v, want a refusal", err)
+	}
+	want := "3 columns have no classification:\n" +
+		"  - users.id has no classification\n" +
+		"  - users.internal_note has no classification\n" +
+		"  - orders.total_amount has no classification"
+	if r.Reason != refusal.Unclassified || r.Detail != want {
+		t.Errorf("runAnonymizeCheck() after init = %s: %q, want %s: %q", r.Reason, r.Detail, refusal.Unclassified, want)
 	}
 }
 

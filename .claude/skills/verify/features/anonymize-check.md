@@ -2,7 +2,9 @@
 
 `brama anonymize check` reads the Classification in `brama.yaml` (and the project's table
 prefix) and says whether a Pull could act on it. It changes nothing. A Classification that
-is missing, contradicts itself or names an unknown Generator is refused with exit `42`.
+is missing, contradicts itself or names an unknown Generator is refused with exit `42`, and
+so is any column or key the schema has and the Classification does not, where a schema is
+read.
 
 ## Sub-features
 
@@ -29,7 +31,7 @@ Preconditions:
 - **Clean.** `S=$($V sandbox classified)`, then
   `$V run "$S" check --expect 0 -- --json anonymize check`. `status` `partial`
   (no schema read offline), `tables` `2`, `columns` `3`, `correlation_groups` `1`,
-  `unclassified_columns` `0`, `keep_substituted` `["local: users.display_name keep → fake.full_name"]`;
+  no `unclassified_columns` key, `keep_substituted` `["local: users.display_name keep → fake.full_name"]`;
   `brama.yaml (unchanged)`.
 - **Approved keep.** `S=$($V sandbox approved)`, same command. `keep_substituted` `[]`.
 - **Unclassified.** `S=$($V sandbox initialized)`, then
