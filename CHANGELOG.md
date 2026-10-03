@@ -290,6 +290,14 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Changed
 
+- **BREAKING:** `brama anonymize check` refuses with exit 42 (`unclassified`) when the
+  schema it reads has a column `brama.yaml` does not classify, instead of reporting
+  `partial` and exiting 0. One refusal names every unclassified column and then every
+  unclassified key, `wp_posts.secret has no classification`, so one run lists them all.
+  `--json` no longer has `unclassified_columns`, because a run that gets far enough to
+  report always has zero. A CI job that ran `check` against a reachable environment should
+  expect 42 until each column it names has an action in `brama.yaml`. Offline runs are
+  unchanged. (#10)
 - **BREAKING:** `brama anonymize init` exits 42 (`unclassified`) when it leaves anything
   unclassified, instead of 0. With `--non-interactive`, `--json` or no terminal it still
   writes what generators claim and reports `partial`, but a script can now tell from the

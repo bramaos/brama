@@ -343,16 +343,98 @@ func TestCheckReportsSuccessOnlyWhenItVerifiedColumnCoverage(t *testing.T) {
 }
 
 // The whole point of needing a database: only a schema can say the column is there.
-func TestCheckReportsAColumnTheSchemaHasAndTheFileDoesNot(t *testing.T) {
+// A column nothing classifies refuses as an unclassified key does (ADR 0003), and every
+// offender is named in the one refusal, columns before keys, so one run says it all.
+func TestCheckRefusesEveryColumnAndKeyTheFileDoesNotClassify(t *testing.T) {
+	note := schema.Column{Name: "internal_note", Type: "text", Declared: "text"}
+	secret := schema.Column{Name: "secret", Type: "varchar", Declared: "varchar(64)", Length: 64}
+	withUsermeta := func(extra ...schema.Column) schema.Schema {
+		s := usermetaSchema()
+		s.Tables[0].Columns = append(s.Tables[0].Columns, extra...)
+		return s
+	}
+
+	tests := []struct {
+		name   string
+		source schemaSource
+		want   string
+	}{
+		{
+			name:   "one column",
+			source: reachable("staging", usersAndOrders(note)),
+			want:   "users.internal_note has no classification",
+		},
+		{
+			name:   "several columns",
+			source: reachable("staging", usersAndOrders(note, secret)),
+			want: "2 columns have no classification:\n" +
+				"  - users.internal_note has no classification\n" +
+				"  - users.secret has no classification",
+		},
+		{
+			name: "columns and keys",
+			source: withKeys("staging", withUsermeta(note, secret), map[string][]string{
+				"usermeta": {"billing_email", "stripe_customer_id"},
+			}),
+			want: "2 columns and 1 key have no classification:\n" +
+				"  - users.internal_note has no classification\n" +
+				"  - users.secret has no classification\n" +
+				"  - usermeta.meta_key='stripe_customer_id' has no classification",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := classifiedProject(t, keyed)
+			env, out, _ := testEnv()
+
+			r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", tt.source))
+
+			if r.Reason != refusal.Unclassified {
+				t.Errorf("Reason = %q, want %q", r.Reason, refusal.Unclassified)
+			}
+			if r.Detail != tt.want {
+				t.Errorf("Detail = %q, want %q", r.Detail, tt.want)
+			}
+			if out.Len() != 0 {
+				t.Errorf("a refused run rendered a result too, want the refusal alone:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// Under --json the refusal is the one object the run emits: the command renders no
+// Result beside it, and Main renders the refusal it returned.
+func TestCheckRefusesAnUnclassifiedColumnAsOneJSONObject(t *testing.T) {
 	root := classifiedProject(t, consistent)
-	env, out, _ := testEnv()
+	var out bytes.Buffer
+	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
 	note := schema.Column{Name: "internal_note", Type: "text", Declared: "text"}
 
-	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", usersAndOrders(note))); err != nil {
-		t.Fatalf("runAnonymizeCheck() = %v, want the column reported and not refused", err)
+	r := refused(t, runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", usersAndOrders(note))))
+	if out.Len() != 0 {
+		t.Fatalf("runAnonymizeCheck() wrote %q, want nothing beside the refusal", out.String())
 	}
-	if !strings.Contains(out.String(), "users.internal_note") {
-		t.Errorf("output does not name the unclassified column:\n%s", out.String())
+	if err := env.Renderer.Refused("anonymize_check", r); err != nil {
+		t.Fatalf("Refused() = %v, want the refusal rendered", err)
+	}
+
+	dec := json.NewDecoder(&out)
+	var payload struct {
+		Action string `json:"action"`
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+		Detail string `json:"detail"`
+	}
+	if err := dec.Decode(&payload); err != nil {
+		t.Fatalf("output is not JSON: %v\n%s", err, out.String())
+	}
+	if dec.More() {
+		t.Errorf("output holds more than one JSON object:\n%s", out.String())
+	}
+	want := "users.internal_note has no classification"
+	if payload.Action != "anonymize_check" || payload.Status != "refused" ||
+		payload.Reason != string(refusal.Unclassified) || payload.Detail != want {
+		t.Errorf("payload = %+v, want anonymize_check refused, unclassified, %q", payload, want)
 	}
 }
 
@@ -437,12 +519,10 @@ func TestCheckComparesAgainstOneSchemaAndNamesWhichOne(t *testing.T) {
 }
 
 // The machine contract carries the same keys either way, and `schema` is what says
-// which run this was. Zero unclassified columns off a run that saw none is not a fact.
+// which run this was. There is no count of unclassified columns: a run that found one
+// refused, and zero off a run that saw none is not a fact.
 func TestCheckResultReportsCoverageInTheContract(t *testing.T) {
-	coverage := anonymize.Coverage{
-		Columns:      4,
-		Unclassified: []anonymize.Uncovered{{Table: "users", Column: schema.Column{Name: "internal_note"}}},
-	}
+	coverage := anonymize.Coverage{Columns: 4, Keys: 2}
 	verified := &AnonymizeCheckResult{Path: "/x/brama.yaml", SchemaFrom: "staging", Coverage: &coverage}
 	unverified := &AnonymizeCheckResult{Path: "/x/brama.yaml"}
 
@@ -451,10 +531,13 @@ func TestCheckResultReportsCoverageInTheContract(t *testing.T) {
 		for _, f := range result.Fields() {
 			keys[f.Key] = f.Value
 		}
-		for _, key := range []string{"schema", "schema_columns", "unclassified_columns"} {
+		for _, key := range []string{"schema", "schema_columns", "schema_keys"} {
 			if _, ok := keys[key]; !ok {
 				t.Errorf("fields = %v, want key %q on every run", keys, key)
 			}
+		}
+		if _, ok := keys["unclassified_columns"]; ok {
+			t.Errorf("fields = %v, want no unclassified_columns — a run that found one refused", keys)
 		}
 	}
 
@@ -462,11 +545,11 @@ func TestCheckResultReportsCoverageInTheContract(t *testing.T) {
 	for _, f := range verified.Fields() {
 		fields[f.Key] = f.Value
 	}
-	if fields["schema"] != "staging" || fields["schema_columns"] != 4 || fields["unclassified_columns"] != 1 {
+	if fields["schema"] != "staging" || fields["schema_columns"] != 4 || fields["schema_keys"] != 2 {
 		t.Errorf("fields = %v, want the comparison it made", fields)
 	}
-	if verified.Status() != renderer.StatusPartial {
-		t.Errorf("Status() = %q, want partial with a column unclassified", verified.Status())
+	if verified.Status() != renderer.StatusSuccess {
+		t.Errorf("Status() = %q, want success with every column and key covered", verified.Status())
 	}
 }
 
@@ -1198,9 +1281,6 @@ func TestCheckCoversAWholeMultisiteNetwork(t *testing.T) {
 	if payload["tables"] != float64(18) {
 		t.Errorf("tables = %v, want the network's eighteen", payload["tables"])
 	}
-	if payload["unclassified_columns"] != float64(0) {
-		t.Errorf("unclassified_columns = %v, want none", payload["unclassified_columns"])
-	}
 	if want := float64(countKeys(keys)); payload["schema_keys"] != want {
 		t.Errorf("schema_keys = %v, want %v — every key of the network read and covered", payload["schema_keys"], want)
 	}
@@ -1230,9 +1310,6 @@ func TestCheckCountsNoNetworkTableOnASingleSite(t *testing.T) {
 	// were named, and two more for the `spam` and `deleted` a network adds to users.
 	if payload["columns"] != float64(293) || payload["correlation_groups"] != float64(2) {
 		t.Errorf("columns, correlation_groups = %v, %v, want 293, 2", payload["columns"], payload["correlation_groups"])
-	}
-	if payload["unclassified_columns"] != float64(0) {
-		t.Errorf("unclassified_columns = %v, want none", payload["unclassified_columns"])
 	}
 	if want := float64(countColumns(s)); payload["schema_columns"] != want {
 		t.Errorf("schema_columns = %v, want %v", payload["schema_columns"], want)
