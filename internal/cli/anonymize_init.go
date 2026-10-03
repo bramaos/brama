@@ -12,6 +12,7 @@ import (
 	"github.com/bramaos/brama/internal/anonymize"
 	"github.com/bramaos/brama/internal/config"
 	"github.com/bramaos/brama/internal/preset"
+	"github.com/bramaos/brama/internal/refusal"
 	"github.com/bramaos/brama/internal/renderer"
 )
 
@@ -82,8 +83,8 @@ func (r *AnonymizeInitResult) Notes() []string {
 	if r.left() == 0 {
 		return nil
 	}
-	notes := []string{"no generator claimed these, so they are left out of the file and " +
-		"unclassified — a pull refuses until each one is decided with brama anonymize review:"}
+	notes := []string{"no generator claimed these and nobody decided them, so they are left out of the " +
+		"file and unclassified — a pull refuses until each one has an action in brama.yaml:"}
 	notes = append(notes, uncoveredNames(r.Unclassified)...)
 	return append(notes, indentAll(keyNames(r.UnclassifiedKeys))...)
 }
@@ -122,12 +123,15 @@ func newAnonymizeInitCmd(env *console) *cobra.Command {
 			"name instead of expanding it, and the tables it already knows are not written out\n" +
 			"again. The file stays short, and a preset brama tightens reaches this project\n" +
 			"without anyone editing it.\n\n" +
-			"Everything else is left out of the file, which leaves it unclassified and a pull\n" +
-			"refused. Nothing is defaulted to `drop`: dropping is safe about privacy and\n" +
-			"reckless about everything else, and zeroing a column brama could not name is a\n" +
-			"product decision that is not brama's to make. `keep` is never written at all —\n" +
-			"it sends real production data, and it enters the file only where a human put it.\n\n" +
-			"Decide the rest with: brama anonymize review",
+			"In a terminal, every column and key nothing claims is then put to you, one at a\n" +
+			"time: leave it, drop it, fake it with a generator that can fill it, or keep it.\n" +
+			"Nothing is defaulted: dropping is safe about privacy and reckless about everything\n" +
+			"else, and zeroing a column brama could not name is a product decision that is not\n" +
+			"brama's to make. `keep` sends real production data, so it enters the file only\n" +
+			"where you put it.\n\n" +
+			"Whatever is left — with --non-interactive, --json or no terminal, all of it — is\n" +
+			"left out of the file, which leaves it unclassified and a pull refused. The run\n" +
+			"writes what generators claimed and exits 42.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -229,10 +233,23 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	}
 
 	tables := anonymize.Bootstrap(coverage)
+
+	// What nothing claimed is put to whoever is at the keyboard, before the file is
+	// touched. Not on a dry run: it writes nothing, so every answer would be thrown away.
+	if env.Choose != nil && !dryRun {
+		if tables, err = walk(env.Choose, tables,
+			anonymize.Unclaimed(coverage, tables), anonymize.UnclaimedKeys(coverage, tables)); err != nil {
+			return err
+		}
+	}
+
+	// Nothing to write is a refusal rather than an empty block, which `check` would refuse
+	// by name anyway. Nothing was written, so running init again in a terminal is the fix.
 	if len(tables) == 0 && named == "" {
-		return fmt.Errorf("no generator claimed any of the %s in %s — "+
-			"classify them with `brama anonymize review`, which asks about them one at a time",
-			plural(coverage.Columns, "column"), from)
+		return refusal.New(refusal.Unclassified,
+			fmt.Sprintf("no generator claimed any of the %s in %s, and nobody decided one — "+
+				"classification requires a human decision", plural(coverage.Columns, "column"), from),
+			"brama anonymize init")
 	}
 
 	body, err := os.ReadFile(path)
@@ -276,6 +293,14 @@ func runAnonymizeInit(ctx context.Context, env *console, dir, only string, dryRu
 	}
 	if dryRun {
 		return env.writeSkeletonPreview(updated)
+	}
+	if result.left() > 0 {
+		// Reported, not raised, as `review` does: the Result above already named every
+		// column left, in both lanes. What is left is the exit code — 42, because brama
+		// is not allowed to decide these, not because anything broke (ADR 0003).
+		return reported(refusal.New(refusal.Unclassified,
+			fmt.Sprintf("%s left unclassified — classification requires a human decision",
+				entries(len(result.Unclassified), len(result.UnclassifiedKeys))), ""))
 	}
 	return nil
 }

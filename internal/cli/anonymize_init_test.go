@@ -55,6 +55,19 @@ func wordpressish() schema.Schema {
 	return schema.Schema{Database: "acme", Tables: []schema.Table{users, orders}}
 }
 
+// bootstrapped fails the test unless init wrote its file: a success, or the refusal a
+// run with columns left and nobody to ask about them ends in.
+func bootstrapped(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	if r, ok := refusal.As(err); ok && r.Reason == refusal.Unclassified {
+		return
+	}
+	t.Fatalf("runAnonymizeInit() = %v, want the file written", err)
+}
+
 // written reads the classification back out of the file the command wrote.
 func written(t *testing.T, root string) *config.Config {
 	t.Helper()
@@ -70,9 +83,7 @@ func TestAnonymizeInitWritesTheClaimedColumns(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, out, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v, want it to classify the schema", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
 	tables := written(t, root).Anonymize.Tables
 	if got := tables["users"].Columns["user_email"].Action; got != "fake.email" {
@@ -95,9 +106,7 @@ func TestAnonymizeInitOmitsWhatNothingClaims(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, _, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
 	users := written(t, root).Anonymize.Tables["users"].Columns
 	for _, name := range []string{"internal_note", "id"} {
@@ -123,9 +132,7 @@ func TestAnonymizeInitNeverWritesKeep(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, _, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
 	body, err := os.ReadFile(filepath.Join(root, config.Filename))
 	if err != nil {
@@ -147,9 +154,7 @@ func TestAnonymizeInitPreservesTheRestOfTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 	after, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -220,11 +225,9 @@ func TestAnonymizeInitNamesWhatItLeftUnclassified(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, out, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
-	for _, want := range []string{"users.internal_note", "orders.total_amount", "brama anonymize review"} {
+	for _, want := range []string{"users.internal_note", "orders.total_amount", "brama.yaml"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output does not mention %q:\n%s", want, out.String())
 		}
@@ -238,9 +241,7 @@ func TestAnonymizeInitReportsPartialWhileAnythingIsUnclassified(t *testing.T) {
 	var out bytes.Buffer
 	env := &console{Out: &out, Err: &out, JSON: true, Renderer: renderer.NewJSON(&out)}
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
 	var payload map[string]any
 	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
@@ -305,9 +306,9 @@ func TestAnonymizeInitDryRunWritesNothingAndShowsWhatItWould(t *testing.T) {
 	}
 }
 
-// A schema brama recognises nothing in, under an adapter it ships no preset for, is not
-// a file to write. Saying so is more use than an empty block, which `anonymize check`
-// would refuse by name anyway.
+// A schema brama recognises nothing in, under an adapter it ships no preset for, with
+// nobody to decide it, is not a file to write. It is a refusal, exit 42, and since
+// nothing was written, running init again in a terminal is the way forward.
 func TestAnonymizeInitFailsWhenNoGeneratorClaimsAnything(t *testing.T) {
 	root := presetlessProject(t)
 	env, _, _ := testEnv()
@@ -315,13 +316,11 @@ func TestAnonymizeInitFailsWhenNoGeneratorClaimsAnything(t *testing.T) {
 		{Name: "retry_count", Type: "int", Declared: "int(11)"},
 	}}}}
 
-	err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", opaque))
+	r := refused(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", opaque)))
 
-	if err == nil {
-		t.Fatal("runAnonymizeInit() = nil, want it to say it recognised nothing")
-	}
-	if !strings.Contains(err.Error(), "brama anonymize review") {
-		t.Errorf("error = %q, want it to point at where the decisions get made", err)
+	if r.Reason != refusal.Unclassified || r.Fix != "brama anonymize init" {
+		t.Errorf("runAnonymizeInit() refused %q with fix %q, want %q with fix brama anonymize init",
+			r.Reason, r.Fix, refusal.Unclassified)
 	}
 	if written := written(t, root).Anonymize; written != nil {
 		t.Errorf("anonymize = %v, want no block that decides nothing", written)
@@ -354,9 +353,7 @@ func TestAnonymizeInitReferencesThePresetRatherThanExpandingIt(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, out, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressCore())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressCore())))
 
 	a := written(t, root).Anonymize
 	if a.Preset != "wordpress" {
@@ -376,9 +373,7 @@ func TestAnonymizeInitDoesNotWriteWhatThePresetCovers(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, _, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressCore())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressCore())))
 
 	tables := written(t, root).Anonymize.Tables
 	if _, written := tables["wp_posts"]; written {
@@ -437,9 +432,7 @@ func TestAnonymizeInitWritesAFileCheckAccepts(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, _, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, reachable("staging", wordpressish())))
 
 	if err := runAnonymizeCheck(t.Context(), env, root, "", reachable("staging", wordpressish())); err != nil {
 		t.Fatalf("runAnonymizeCheck() after init = %v, want the written file to hold together", err)
@@ -471,9 +464,7 @@ func TestAnonymizeInitWritesTheKeysAGeneratorClaims(t *testing.T) {
 	root := unclassifiedProject(t)
 	env, out, _ := testEnv()
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, pluginKeys()); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, pluginKeys()))
 
 	usermeta := written(t, root).Anonymize.Tables["wp_usermeta"]
 	if got := usermeta.Keys["billing_email"].Action; got != "fake.email" {
@@ -502,9 +493,7 @@ func TestAnonymizeInitContractCountsTheKeys(t *testing.T) {
 	env, out, _ := testEnv()
 	env.Renderer, env.JSON = renderer.NewJSON(out), true
 
-	if err := runAnonymizeInit(t.Context(), env, root, "", false, pluginKeys()); err != nil {
-		t.Fatalf("runAnonymizeInit() = %v", err)
-	}
+	bootstrapped(t, runAnonymizeInit(t.Context(), env, root, "", false, pluginKeys()))
 
 	var payload struct {
 		Status       string `json:"status"`

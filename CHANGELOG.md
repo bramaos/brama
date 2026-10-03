@@ -11,6 +11,10 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Added
 
+- Decide every column and key no generator claims in `brama anonymize init`. In a terminal
+  each one is a question: leave it unclassified, `drop`, a `fake.<generator>` that can fill
+  it, or `keep`. Enter alone leaves it, and `q` stops asking and keeps what you answered.
+  `--dry-run` asks nothing. (#9)
 - Cover a multisite network's six site-global tables in the `wordpress` preset:
   `wp_blogs`, `wp_site`, `wp_sitemeta`, `wp_blogmeta`, `wp_signups` and
   `wp_registration_log`, named under your own table prefix, plus the `spam` and `deleted`
@@ -286,6 +290,12 @@ See `docs/agents/changelog.md` for how entries are written.
 
 ### Changed
 
+- **BREAKING:** `brama anonymize init` exits 42 (`unclassified`) when it leaves anything
+  unclassified, instead of 0. With `--non-interactive`, `--json` or no terminal it still
+  writes what generators claim and reports `partial`, but a script can now tell from the
+  exit code that a pull will refuse. A script that runs init unattended should expect 42,
+  then give each column it names an action in `brama.yaml`. A schema nothing claims, with
+  no preset and nobody to decide it, is now a refusal (42) too, not an error (1). (#9)
 - Count two more classified columns in `wp_users` in `brama anonymize check` on a
   single-site WordPress install: the `wordpress` preset now names multisite's `spam` and
   `deleted`. With no schema in reach, the preset counts eighteen tables, not twelve. (#74)

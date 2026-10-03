@@ -9,6 +9,6 @@ A rule with no citation is uncited on purpose: its reason is the code it describ
 - Return errors from `RunE`; never call `os.Exit`, `log.Fatal` or `panic`. `Main` alone turns the outcome into exit 0, 1 or 42. (`internal/cli/cli.go` package doc)
 - Return a `refusal.Refusal` when brama is not allowed to act and an error when something broke; a Refusal is not a failure. (ADR-0003, PD §10)
 - Let `--non-interactive` and `--json` stop prompts, never guardrails; add no `--yes` or `--force` that skips a check. (PD §10, ADR-0005)
-- Ask only through `env.Ask`, and treat a nil `Ask` as the normal case: take the narrower answer and finish. (`console.Ask` doc)
+- Ask only through `env.Ask` or `env.Choose`, and treat nil as the normal case: take the narrower answer and finish. (`console.Ask` doc)
 - Add no destructive remote operation to v0.1; deployment waits for the data half to ship. (ADR-0004)
 - Give every command that changes state, local or on a Server, a `--dry-run` that changes nothing, never asks, reports `dry_run` and exits as the real run would; test that it left every file unchanged. (ADR-0020)

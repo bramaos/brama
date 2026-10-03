@@ -1,9 +1,10 @@
 // Package prompt asks a question a person answers with the keyboard.
 //
-// It holds one question: a checklist. Everything brama asks interactively is the same
-// question asked about a list — "which of these do you approve?" — and a package that
-// grew a second widget for every command would be a place where two commands ask the
-// same thing in two different shapes.
+// It holds two questions, and is meant to stay at two. A checklist asks "which of these
+// do you approve?" about a list, and a choice asks "which one of these?" about a single
+// thing — the one answer `anonymize init` needs per column nothing claimed. A package
+// that grew a widget for every command would be a place where two commands ask the same
+// thing in two different shapes.
 //
 // The model is separated from the terminal on purpose. Run reads keystrokes from any
 // reader and writes frames to any writer, so the whole of the behaviour is testable
@@ -85,8 +86,29 @@ func Run(in io.Reader, out io.Writer, title string, items []Item) ([]bool, error
 		c.checked[i] = item.Checked
 	}
 
-	if err := c.draw(out); err != nil {
+	if err := run(in, out, c); err != nil {
 		return nil, err
+	}
+	return c.checked, nil
+}
+
+// question is one of the widgets this package asks with, seen from the loop that drives
+// it: what keystrokes do to it, and what it looks like.
+type question interface {
+	// handle applies everything one read carried, and says whether the question is over.
+	handle(keys []byte) (done, cancelled bool)
+	// view is the current frame, one string per line.
+	view() []string
+	// finish marks the answer as in, so the next frame is the one left on the screen.
+	finish()
+}
+
+// run draws q, feeds it keystrokes until it is answered or left, and returns
+// ErrCancelled if it was left.
+func run(in io.Reader, out io.Writer, q question) error {
+	var s screen
+	if err := s.draw(out, q.view()); err != nil {
+		return err
 	}
 
 	// One read can carry several keystrokes — an escape sequence is three bytes, and a
@@ -96,29 +118,63 @@ func Run(in io.Reader, out io.Writer, title string, items []Item) ([]bool, error
 	for {
 		n, err := in.Read(buf)
 		if n > 0 {
-			done, cancelled := c.handle(buf[:n])
-			c.finished = done || cancelled
-			if drawErr := c.draw(out); drawErr != nil {
-				return nil, drawErr
+			done, cancelled := q.handle(buf[:n])
+			if done || cancelled {
+				q.finish()
+			}
+			if drawErr := s.draw(out, q.view()); drawErr != nil {
+				return drawErr
 			}
 			if cancelled {
-				return nil, ErrCancelled
+				return ErrCancelled
 			}
 			if done {
-				return c.checked, nil
+				return nil
 			}
 		}
 		if err != nil {
 			// A closed input is somebody who left, not a failure to report: the terminal
 			// went away, and there is no answer to be had either way.
 			if errors.Is(err, io.EOF) {
-				c.finished = true
-				_ = c.draw(out)
-				return nil, ErrCancelled
+				q.finish()
+				_ = s.draw(out, q.view())
+				return ErrCancelled
 			}
-			return nil, fmt.Errorf("reading the answer: %w", err)
+			return fmt.Errorf("reading the answer: %w", err)
 		}
 	}
+}
+
+// screen is what the last frame left on the terminal.
+type screen struct {
+	// drawn is how many lines the last frame took, so the next one can erase exactly it.
+	drawn int
+}
+
+// draw replaces the last frame with lines.
+//
+// The cursor is walked back over the previous frame and everything below it cleared,
+// rather than the screen being wiped: whatever the person had in their scrollback before
+// running brama is theirs, and a command that clears the terminal to ask a question has
+// thrown away the output they were reading when they decided to run it.
+func (s *screen) draw(out io.Writer, lines []string) error {
+	var b strings.Builder
+	if s.drawn > 0 {
+		fmt.Fprintf(&b, "\x1b[%dA\r\x1b[0J", s.drawn)
+	}
+
+	// Raw mode turns off the translation of \n into a carriage return, so every line
+	// ends with both or the frame walks off to the right.
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteString("\r\n")
+	}
+	s.drawn = len(lines)
+
+	if _, err := io.WriteString(out, b.String()); err != nil {
+		return fmt.Errorf("drawing the question: %w", err)
+	}
+	return nil
 }
 
 // checklist is the question and everything the person has done to it so far.
@@ -133,36 +189,9 @@ type checklist struct {
 	// last frame. What stays on the screen afterwards is the decision itself, which is
 	// what the next reader — often the person writing the commit message — needs.
 	finished bool
-	// drawn is how many lines the last frame took, so the next one can erase exactly it.
-	drawn int
 }
 
-// draw replaces the last frame with the current one.
-//
-// The cursor is walked back over the previous frame and everything below it cleared,
-// rather than the screen being wiped: whatever the person had in their scrollback before
-// running brama is theirs, and a command that clears the terminal to ask a question has
-// thrown away the output they were reading when they decided to run it.
-func (c *checklist) draw(out io.Writer) error {
-	var b strings.Builder
-	if c.drawn > 0 {
-		fmt.Fprintf(&b, "\x1b[%dA\r\x1b[0J", c.drawn)
-	}
-
-	lines := c.view()
-	// Raw mode turns off the translation of \n into a carriage return, so every line
-	// ends with both or the frame walks off to the right.
-	for _, line := range lines {
-		b.WriteString(line)
-		b.WriteString("\r\n")
-	}
-	c.drawn = len(lines)
-
-	if _, err := io.WriteString(out, b.String()); err != nil {
-		return fmt.Errorf("drawing the question: %w", err)
-	}
-	return nil
-}
+func (c *checklist) finish() { c.finished = true }
 
 // view is the frame: the question, the lines, and how to answer it.
 func (c *checklist) view() []string {
@@ -226,7 +255,6 @@ func (c *checklist) line(i int, item Item, width int) string {
 	return b.String()
 }
 
-// handle applies everything one read carried, and says whether the question is over.
 func (c *checklist) handle(keys []byte) (done, cancelled bool) {
 	for i := 0; i < len(keys); i++ {
 		switch key := keys[i]; key {
