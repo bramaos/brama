@@ -51,7 +51,7 @@ like its neighbours is easier to read than code that follows a better rule alone
 - brama has no logger. Don't add `log` or `log/slog` calls to report progress or failures
   from inside a package. Return the error.
   `log.Printf("skipping %s: %v", table, err)` → `return fmt.Errorf("copying %s: %w", table, err)`
-- Name domain concepts with `CONTEXT.md`'s terms. Its _Avoid_ lists apply to identifiers too.
+- Name domain concepts with `GLOSSARY.md`'s terms. Its _Avoid_ lists apply to identifiers too.
   `func (s Stage) Name()` → `func (e Environment) Name()`
 
 ## Context

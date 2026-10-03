@@ -50,7 +50,7 @@ Rules for the text itself:
   > - **BREAKING:** `brama push` is now `brama deploy`. Update scripts and CI.
 - **Link the issue** when one exists: `(#42)`. Never paste a commit SHA or a commit
   message — a changelog is not a git log.
-- **No internal jargon.** If the term isn't in `CONTEXT.md` or the CLI's own help
+- **No internal jargon.** If the term isn't in `GLOSSARY.md` or the CLI's own help
   output, rephrase it.
 
 ## Cutting a release

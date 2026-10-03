@@ -119,4 +119,4 @@ clause with no blank line. A long package comment may get its own `doc.go`.
 - `test/testenv`: tests against containerised servers, behind `//go:build testenv`, run by
   `make testenv-test` (see `docs/adr/0008-test-against-containerised-servers.md`).
 
-The domain vocabulary for package and type names is `CONTEXT.md`.
+The domain vocabulary for package and type names is `GLOSSARY.md`.

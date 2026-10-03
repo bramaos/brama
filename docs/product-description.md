@@ -1,7 +1,7 @@
 # BramaOS — Product Description
 
 > Status: decided, v0.1 not yet implemented.
-> Purpose: canonical context document. Read alongside `CONTEXT.md` and `docs/adr/`.
+> Purpose: canonical context document. Read alongside `GLOSSARY.md` and `docs/adr/`.
 > Every decision here is settled. If a change is needed, change this file first, then the code.
 
 ---
@@ -556,7 +556,7 @@ Architectural consequence: **the CLI must be fully useful with no account and no
 
 ## 14. Vocabulary
 
-Canonical terms live in `CONTEXT.md`. Use them exactly, in code and in docs. Decisions with real trade-offs behind them live in `docs/adr/`.
+Canonical terms live in `GLOSSARY.md`. Use them exactly, in code and in docs. Decisions with real trade-offs behind them live in `docs/adr/`.
 
 ## 15. Success criterion for v0.1
 

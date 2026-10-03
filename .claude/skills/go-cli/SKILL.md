@@ -22,7 +22,7 @@ do steps 7 to 10.
 
 ## 1. Name it
 
-Choose the command path, `brama <group> <verb>`, in `CONTEXT.md`'s terms. Everything else is
+Choose the command path, `brama <group> <verb>`, in `GLOSSARY.md`'s terms. Everything else is
 named from it. For `brama server add`:
 
 | Piece       | Name                                  |

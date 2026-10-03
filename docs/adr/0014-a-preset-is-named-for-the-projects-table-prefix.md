@@ -11,7 +11,7 @@ value out of the project's own config: `wp-config.php`, or `config/application.p
 `.env` on Bedrock. It is read every time a Preset is resolved, and never recorded in
 `brama.yaml` — a prefix written down twice can disagree with itself, and the copy in
 `brama.yaml` is the one nobody updates when the install moves. The prefix is Adapter
-knowledge in the sense `CONTEXT.md` already uses, so it lives beside detection rather than
+knowledge in the sense `GLOSSARY.md` already uses, so it lives beside detection rather than
 in `internal/preset`, and the Preset vocabulary stays closed and framework-free.
 
 A prefix Brama cannot determine is a Refusal naming the files it read, never a fallback to

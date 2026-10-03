@@ -112,7 +112,7 @@ func TestAnonymizeRejectsScalarShorthand(t *testing.T) {
 	}
 }
 
-// There is no fourth action. `mask` in particular is refused by name: CONTEXT.md
+// There is no fourth action. `mask` in particular is refused by name: GLOSSARY.md
 // bans the word, and partial preservation derives output from the real value, which
 // is the pseudonymization ADR 0002 exists to prevent.
 func TestAnonymizeRejectsAnythingThatIsNotAnAction(t *testing.T) {

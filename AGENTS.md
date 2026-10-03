@@ -20,7 +20,7 @@ Commit messages follow Conventional Commits 1.0.0. The type drives the SemVer bu
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 ## Agent architecture
 
