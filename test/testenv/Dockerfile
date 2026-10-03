@@ -3,7 +3,7 @@
 # through the Windows credential helper and fails before a single layer is read. This
 # file uses nothing the built-in frontend of Docker 23+ does not already have.
 
-# A Server, as CONTEXT.md defines one: a registered SSH host.
+# A Server, as GLOSSARY.md defines one: a registered SSH host.
 #
 # Ubuntu 24.04 with systemd as PID 1, a real sshd, and the stack a rented WordPress
 # Server runs — MariaDB, Apache, PHP-FPM, WP-CLI, Bedrock. MariaDB is *inside* the

@@ -163,7 +163,7 @@ Source: https://raw.githubusercontent.com/charmbracelet/fang/main/fang.go (verba
 
 **Version & manpages:** Automatic `--version` (from `debug.BuildInfo()` unless overridden by `WithVersion`). Manpages via a hidden `man` subcommand. Both disableable.
 
-**The real sharp edge:** fang's default error handler prints *every* returned error styled as an error. A Refusal is not an error — `CONTEXT.md` defines it as an outcome where nothing went wrong. So brama must supply `WithErrorHandler` that renders a Refusal differently, or return Refusals through a channel other than the error return.
+**The real sharp edge:** fang's default error handler prints *every* returned error styled as an error. A Refusal is not an error — `GLOSSARY.md` defines it as an outcome where nothing went wrong. So brama must supply `WithErrorHandler` that renders a Refusal differently, or return Refusals through a channel other than the error return.
 
 **Verdict:** **Adopt.** It is compatible with exit code 42, and `--version` / manpages / completions / styled help are exactly the "less manual work" brama wants. Requires a custom `ErrorHandler` so Refusals don't render as failures.
 
@@ -482,7 +482,7 @@ Bubble Tea has no non-TTY fallback. If `brama db pull --dry-run` is run in CI or
 **Mitigation:** Check `isatty.IsTerminal()` or use Lipgloss's `colorprofile.Detect()` to branch logic early. Do not import Bubble Tea if non-TTY is possible.
 
 ### 2. Fang renders a Refusal as an error
-Not an exit-code problem — fang returns the error and never exits. The problem is presentational: fang's `DefaultErrorHandler` styles anything non-nil as a failure, but `CONTEXT.md` defines a Refusal as an outcome where *nothing went wrong*. Shipping the default handler would contradict the glossary on screen.
+Not an exit-code problem — fang returns the error and never exits. The problem is presentational: fang's `DefaultErrorHandler` styles anything non-nil as a failure, but `GLOSSARY.md` defines a Refusal as an outcome where *nothing went wrong*. Shipping the default handler would contradict the glossary on screen.
 
 **Mitigation:** Supply `fang.WithErrorHandler` that branches on a `ErrRefused` sentinel, or keep Refusals out of the error return entirely.
 

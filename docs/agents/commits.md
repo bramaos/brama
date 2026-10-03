@@ -55,7 +55,7 @@ Optional. A noun naming the part of the codebase that changed, in parentheses:
 fix(mysql): quote identifiers that collide with reserved words
 ```
 
-Prefer a term already in `CONTEXT.md` — `adapter`, `shim`, `sync`, `policy`,
+Prefer a term already in `GLOSSARY.md` — `adapter`, `shim`, `sync`, `policy`,
 `classification`, `preset`, `discriminator` — or a package name (`mysql`, `postgres`,
 `ssh`, `config`). Omit the scope rather than inventing a vague one; `feat(core):` says
 nothing.

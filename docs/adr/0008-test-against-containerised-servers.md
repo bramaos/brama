@@ -21,7 +21,7 @@ assertions were tautologies, and the four that mattered were the four not being 
 
 The Servers run privileged, with the host cgroup hierarchy mounted writable and tmpfs
 at `/run`. That is the opposite of what a container should do, and it is the cost of
-the one thing the rig exists for: systemd as PID 1. A Server, as CONTEXT.md defines
+the one thing the rig exists for: systemd as PID 1. A Server, as GLOSSARY.md defines
 it, is a registered SSH host, and the Servers Brama is pointed at boot their
 database and their web server as units. A container running `sshd` under a shell
 wrapper would be reachable but would not be that; the Shim would find no `mysqldump`
@@ -64,6 +64,6 @@ path that Classifications exist to trigger.
   from whether an Environment names a Server, so a third container would be
   SSH-reached and would test the direct path zero times. That waits for `db pull`,
   when the receiving side's needs are known.
-- No new term enters CONTEXT.md. A container running `sshd` already *is* a Server
+- No new term enters GLOSSARY.md. A container running `sshd` already *is* a Server
   under the existing definition — which is precisely why the rig is worth building —
   and the glossary stays free of test infrastructure.

@@ -135,7 +135,7 @@ Tracked as [issues](https://github.com/bramaos/brama/issues), grouped by
 | | |
 |---|---|
 | [`docs/product-description.md`](docs/product-description.md) | What Brama is, what v0.1 contains, and why |
-| [`CONTEXT.md`](CONTEXT.md) | The vocabulary, used exactly, in code and docs |
+| [`GLOSSARY.md`](GLOSSARY.md) | The vocabulary, used exactly, in code and docs |
 | [`docs/adr/`](docs/adr/) | Decisions that were hard to reverse, and what they cost |
 
 ## License

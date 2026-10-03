@@ -109,6 +109,6 @@ In brama, `nakedret` reports a naked return in a function longer than 30 lines.
 
 ## Domain names
 
-Identifiers that name a domain concept use `CONTEXT.md`'s term. The `_Avoid_` list under
+Identifiers that name a domain concept use `GLOSSARY.md`'s term. The `_Avoid_` list under
 each term applies to code as much as to prose. This is brama's rule
 (`docs/agents/domain.md`), not Go's.

@@ -28,7 +28,8 @@ detail, fetch it from Context7 (`/spf13/cobra`) at the time of use rather than f
   kebab-case; help text is lowercase, has no closing period, and says what the flag does
   to this run.
 - Required: `_ = cmd.MarkFlagRequired("host")`, right after the flag is declared.
-- `--dry-run` is the name for "report what would happen, and change nothing".
+- `--dry-run` is the name for "report what would happen, and change nothing". Every
+  command that changes state has one; ADR-0020 says what it must guarantee.
 - Persistent flags live on root only: `--json` and `--non-interactive`. Commands read
   them from `env.JSON` and `env.Ask`, never from the flag set.
 

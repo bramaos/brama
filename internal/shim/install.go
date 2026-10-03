@@ -27,7 +27,7 @@ const keptVersions = 2
 //
 // Declared here, where it is consumed, rather than by the transport — there is one
 // real implementation, and this is the only place that benefits from substituting
-// it. Deliberately not called Executor or Runner: CONTEXT.md reserves Executor for
+// it. Deliberately not called Executor or Runner: GLOSSARY.md reserves Executor for
 // the operation channel v0.2 introduces, which carries structured operations rather
 // than shell commands, and this is not that.
 type Remote interface {

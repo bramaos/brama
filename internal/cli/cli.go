@@ -55,7 +55,7 @@ func reported(err error) error {
 // console is what commands render through. It exists so a test can swap the renderer
 // and the streams without touching a global.
 //
-// Deliberately not called `environment`: CONTEXT.md reserves that word for a named
+// Deliberately not called `environment`: GLOSSARY.md reserves that word for a named
 // target brama acts on, and reusing it here for a render context would put two
 // meanings on the project's most load-bearing noun.
 type console struct {

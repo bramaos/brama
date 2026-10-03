@@ -1,7 +1,7 @@
 # BramaOS — Product Description
 
 > Status: decided, v0.1 not yet implemented.
-> Purpose: canonical context document. Read alongside `CONTEXT.md` and `docs/adr/`.
+> Purpose: canonical context document. Read alongside `GLOSSARY.md` and `docs/adr/`.
 > Every decision here is settled. If a change is needed, change this file first, then the code.
 
 ---
@@ -445,8 +445,9 @@ sends nothing and writes nothing, in `brama.yaml` or on the Server.
 
 ### `--dry-run`
 
-Every acting command whose effect is local supports it. It resolves everything and executes
-nothing:
+Every command that changes state supports it, whether its effect is local or on a Server
+(ADR-0020). It resolves everything and executes nothing. It never asks, and it exits as the
+real run would:
 
 ```
 Environment:       production
@@ -459,8 +460,7 @@ Unclassified:      0
 Columns faked:     41
 URL rewrite:       https://www.example.com -> https://example.local.test
 Local recovery:    will dump 214 MB before import
-
-Continue? [y/N]
+Dry run:           yes
 ```
 
 ### Server requirements
@@ -556,7 +556,7 @@ Architectural consequence: **the CLI must be fully useful with no account and no
 
 ## 14. Vocabulary
 
-Canonical terms live in `CONTEXT.md`. Use them exactly, in code and in docs. Decisions with real trade-offs behind them live in `docs/adr/`.
+Canonical terms live in `GLOSSARY.md`. Use them exactly, in code and in docs. Decisions with real trade-offs behind them live in `docs/adr/`.
 
 ## 15. Success criterion for v0.1
 
