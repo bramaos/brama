@@ -97,8 +97,10 @@ desktop.ini
 !brama.yaml
 
 # The go-* skills under .claude/skills/ are brama's own procedures for agents, named in
-# AGENTS.md, and are committed. The rest of .claude/ is per-machine: settings and
-# skills a developer installed for themselves.
+# AGENTS.md, and are committed, as is verify/, the driver that proves a command by
+# running the built binary (docs/agents/rules/testing.md). The rest of .claude/ is
+# per-machine: settings and skills a developer installed for themselves.
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/go-*/
+!.claude/skills/verify/
