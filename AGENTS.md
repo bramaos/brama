@@ -32,3 +32,22 @@ in `docs/agents/go/references/`.
 To add a command or change one's flags, arguments or output, follow the `go-cli` skill,
 `.claude/skills/go-cli/SKILL.md`: the procedure from file and registration to the
 rendered Result and `make check`.
+
+## Where things are
+
+- `cmd/brama/`: the binary's `main`, one line that calls `cli.Main`. Read when you change how the binary starts.
+- `cmd/brama-shim/`: the Shim program that runs on a Server and links only the core. Read when you change what runs on a Server.
+- `internal/cli/`: every Cobra command, the exit codes, and the renderer choice. Read when you add a command or change flags or output.
+- `internal/config/`: reading, checking, and editing `brama.yaml`. Read when you change the config format.
+- `internal/anonymize/`: `check`, `review`, approval, and coverage of column classifications. Read when you change how columns are classified.
+- `internal/preset/`: the classifications that brama ships for each framework. Read when you add or change a preset.
+- `internal/schema/`: database shape types, with `mysql/`, `postgres/`, and the shared `catalog/` loop. Read when you add a database driver.
+- `internal/adapter/`: framework knowledge (`wordpress/`): how to find an install and its parts. Read when you add a framework.
+- `internal/generator/`: the closed set of fake-value recipes. Read when you add a recipe.
+- `internal/shim/`: building and installing the Shim on a Server.
+- `internal/renderer/`: human and JSON output of a Result. Read when you change the output.
+- `internal/prompt/`: keyboard checklist and single-choice prompts.
+- `internal/state/`, `internal/ssh/`, `internal/scaffold/`, `internal/refusal/`, `internal/version/`: Observed state, OpenSSH calls, the starting `brama.yaml`, the Refusal outcome, and version ordering.
+- `internal/arch/`: a test that keeps the core free of CLI and renderer imports. Read when you add a core package.
+- `test/testenv/`: end-to-end tests against two containerised Servers, behind the `testenv` build tag. Unit tests sit next to the code as `*_test.go`.
+- `docs/`: ADRs in `adr/`, agent rules and Go guides in `agents/`, and `product-description.md`. Read when you need the reason for a decision.
