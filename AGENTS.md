@@ -48,6 +48,6 @@ rendered Result and `make check`.
 - `internal/renderer/`: human and JSON output of a Result. Read when you change the output.
 - `internal/prompt/`: keyboard checklist and single-choice prompts.
 - `internal/state/`, `internal/ssh/`, `internal/scaffold/`, `internal/refusal/`, `internal/version/`: Observed state, OpenSSH calls, the starting `brama.yaml`, the Refusal outcome, and version ordering.
-- `internal/arch/`: a test that keeps the core free of CLI and renderer imports. Read when you add a core package.
+- `internal/arch/`: tests that keep the core and the Shim free of CLI and renderer imports. Read when you add a core package or change what the Shim imports.
 - `test/testenv/`: end-to-end tests against two containerised Servers, behind the `testenv` build tag. Unit tests sit next to the code as `*_test.go`.
 - `docs/`: ADRs in `adr/`, agent rules and Go guides in `agents/`, and `product-description.md`. Read when you need the reason for a decision.

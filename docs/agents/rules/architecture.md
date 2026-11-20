@@ -6,7 +6,7 @@ A rule with no citation is uncited on purpose: its reason is the code it describ
 
 - Keep the core free of `internal/renderer`, `internal/cli`, Cobra and every Charm package. (PD §9, "The rendering rule")
 - Add each new core package to `corePackages` in `internal/arch/arch_test.go`, which enforces the rule above.
-- Keep `cmd/brama/main.go` to `os.Exit(cli.Main(version))`; commands and exit codes live in `internal/cli`. `cmd/brama-shim` links only the core.
+- Keep `cmd/brama/main.go` to `os.Exit(cli.Main(version))`; commands and exit codes live in `internal/cli`. `cmd/brama-shim` links only the core, which `internal/arch/arch_test.go` enforces.
 - Never assign a package-level `var` after init; pass anything a test would swap, as `console` is passed.
 - Anonymize on the Server, inside the Shim; never let a raw value of a `fake` or `drop` column reach the laptop. (ADR-0001)
 - Roll fake values at random per Pull, never derived from the real value; keep the mapping on the Server and destroy it when the Pull ends. (ADR-0002)
