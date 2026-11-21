@@ -104,3 +104,4 @@ desktop.ini
 .claude/skills/*
 !.claude/skills/go-*/
 !.claude/skills/verify/
+.claude/worktrees/
